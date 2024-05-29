@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "csc"
+dynamic = ["version"]
+description = ''
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "YanisGomes", email = "yanis.gomes@ens-paris-saclay.fr" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://github.com/YanisGomes/csc#readme"
+Issues = "https://github.com/YanisGomes/csc/issues"
+Source = "https://github.com/YanisGomes/csc"
+
+[tool.hatch.version]
+path = "src/csc/__about__.py"
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/csc tests}"
+
+[tool.coverage.run]
+source_pkgs = ["csc", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/csc/__about__.py",
+]
+
+[tool.coverage.paths]
+csc = ["src/csc", "*/csc/src/csc"]
+tests = ["tests", "*/csc/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
