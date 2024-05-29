@@ -10,6 +10,8 @@ from scipy.sparse.linalg import LinearOperator, lsqr
 from collections import Counter
 from scipy.signal import oaconvolve
 
+from joblib import Parallel, delayed
+
 from .atoms import ZSAtom
 
 def time_decorator(func):
@@ -33,7 +35,6 @@ def time_decorator(func):
             result = func(*args, **kwargs)
         return result
     return wrapper
-
 
 class ZSDictionary() :
 
@@ -321,22 +322,9 @@ class ZSDictionary() :
             pos_err_collection.extend(self.atomsDictPositionMatchingErrors(info['original'], info['recovered']))
         pos_err_counter = Counter(pos_err_collection)
         return pos_err_counter
-    
-    @time_decorator
-    def ompPositionErrorPipeline(self, sparsity_level:int, batch_size:int, verbose:bool=False) -> Dict[float, Counter]:
-        """Compute the histogram of the position errors for the OMP algorithm for different noise levels
-        Args:
-            sparsity_level (int): The sparsity level of the signals
-            batch_size (int): The number of signals to generate and test
-        Returns:
-            Dict[float, Counter]: The dictionary of the histograms of the position errors for different noise levels
-        """
-        pos_err_counters = {}
-        signalLength = self.atoms_length*2
-        noiseLevels = np.arange(0.0, 0.21, 0.01)
-        for noise in noiseLevels:
-            if verbose:
-                print(f"--- Noise Level {noise} ---")
-            pos_err_counter = self.ompPositionErrorBatch(sparsity_level, noise, batch_size, verbose=verbose)
-            pos_err_counters[noise] = pos_err_counter
-        return pos_err_counters
+
+    def ompPositionErrorPipeline(self, sparsity_level:int, batch_size:int, verbose=False):
+        noise_levels = np.concatenate((np.arange(0.0, 0.11, 0.01), np.arange(0.12, 0.22, 0.02))) 
+        parallel_cores = 70
+        results = Parallel(n_jobs=parallel_cores)(delayed(self.ompPositionErrorBatch)(sparsity_level, noise, batch_size, verbose=verbose) for noise in noise_levels)
+        return dict(zip(noise_levels, results))
