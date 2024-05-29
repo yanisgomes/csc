@@ -1,4 +1,5 @@
 import time
+import json
 from tqdm import tqdm
 from numba import njit, jit
 import numpy as np
@@ -322,4 +323,8 @@ class ZSDictionary() :
     def ompPositionErrorPipeline(self, sparsity_level:int, batch_size:int, cores=50, verbose=False):
         noise_levels = np.concatenate((np.arange(0.0, 0.11, 0.01), np.arange(0.12, 0.22, 0.02))) 
         results = Parallel(n_jobs=cores)(delayed(self.ompPositionErrorBatch)(sparsity_level, noise, batch_size, verbose=verbose) for noise in noise_levels)
-        return dict(zip(noise_levels, results))
+        results_dict = dict(zip(noise_levels, results))
+        # Convertir les résultats en JSON et les enregistrer dans un fichier
+        with open(f'posErrPipeline_s{sparsity_level}_b{batch_size}.json', 'w') as json_file:
+            json.dump(results_dict, json_file, indent=4) 
+        return results_dict
