@@ -325,6 +325,6 @@ class ZSDictionary() :
         results = Parallel(n_jobs=cores)(delayed(self.ompPositionErrorBatch)(sparsity_level, noise, batch_size, verbose=verbose) for noise in noise_levels)
         results_dict = dict(zip(noise_levels, results))
         # Convertir les résultats en JSON et les enregistrer dans un fichier
-        with open(f'posErrPipeline_s{sparsity_level}_b{batch_size}.json', 'w') as json_file:
+        with open(f'output_posErrPipeline_s{sparsity_level}_b{batch_size}.json', 'w') as json_file:
             json.dump(results_dict, json_file, indent=4) 
         return results_dict
