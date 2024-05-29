@@ -1,4 +1,5 @@
 import time
+from tqdm import tqdm
 from numba import njit, jit
 import numpy as np
 from einops import rearrange
@@ -277,7 +278,7 @@ class ZSDictionary() :
         infos = []
         if verbose :
             print("~~~OMP Test Batch of {} signals ~~~".format(batch_size))
-        for i in range(batch_size):
+        for i in tqdm(range(batch_size), desc='OMP Test Batch for noise_level = {:.2f}'.format(noise_level)) :
             if verbose :
                 print("========= Signal {}/{} =========".format(i+1, batch_size))
             signal, atoms_info = self.generateTestSignal(signals_length, sparsity_level, noise_level)
