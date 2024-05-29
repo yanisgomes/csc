@@ -150,7 +150,6 @@ class ZSDictionary() :
             signals_atoms_infos.append(atoms_infos)
         return signals, signals_atoms_infos
     
-    @time_decorator
     def computeConvolutions(self, activations) :
         """
         This funcion is the matvec function of the MaskedConvOperator
@@ -166,7 +165,6 @@ class ZSDictionary() :
         convolutions = oaconvolve(activations, atoms_signals.T, mode='full', axes=0).sum(axis=1)
         return convolutions
 
-    @time_decorator
     def computeCorrelations(self, signal):
         """
         This function computes the correlation of the signal with the dictionary
@@ -181,7 +179,6 @@ class ZSDictionary() :
         all_correlations = oaconvolve(stacked_signals, atom_signals.T, mode='valid', axes=0)
         return all_correlations
     
-    @time_decorator
     def getMaskedConvOperator(self, activation_mask) :
         """Return a LinearOperator that masks and does the convolution."""
         nb_activations = activation_mask.shape[0]
@@ -292,8 +289,7 @@ class ZSDictionary() :
             infos.append({'original':atoms_info, 'recovered':recov_atoms_infos, 'mse': mse})
 
         return signals, reconstructions, infos
-    
-    @time_decorator
+
     def atomsDictPositionMatchingErrors(self, atoms_info:List[dict], recov_atoms_info:List[dict]) -> List[int]:
         """Match the original atoms parameters with their recovered ones
         Args:
@@ -307,7 +303,6 @@ class ZSDictionary() :
         position_errors = [recov_atoms_info[np.argmin(position_errors_combinations[i])]['x'] - atoms_info[i]['x'] for i in range(len(atoms_info))]
         return position_errors
     
-    @time_decorator
     def ompPositionErrorBatch(self, sparsity_level:int, noise_level:int, batch_size:int, verbose:bool=False) -> Counter:
         """Compute the histogram of the position errors for the OMP algorithm
         Args:
