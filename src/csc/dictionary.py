@@ -319,7 +319,7 @@ class ZSDictionary() :
         pos_err_counter = Counter(pos_err_collection)
         return pos_err_counter
 
-    def ompPositionErrorPipeline(self, sparsity_level:int, batch_size:int, cores=70, verbose=False):
+    def ompPositionErrorPipeline(self, sparsity_level:int, batch_size:int, cores=50, verbose=False):
         noise_levels = np.concatenate((np.arange(0.0, 0.11, 0.01), np.arange(0.12, 0.22, 0.02))) 
         results = Parallel(n_jobs=cores)(delayed(self.ompPositionErrorBatch)(sparsity_level, noise, batch_size, verbose=verbose) for noise in noise_levels)
         return dict(zip(noise_levels, results))
