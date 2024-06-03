@@ -103,12 +103,12 @@ class ZSDictionary() :
     def getAtomsLength(self) -> int :
         return self.atoms_length
 
-    def generateTestSignal(self, signal_length, sparsity_level, noise_level) -> np.ndarray:
+    def generateTestSignal(self, signal_length, sparsity_level, snr_level) -> np.ndarray:
         """Generate a test signal as a linear combination of the atoms in the dictionary
         Args:
             signal_length (int): The length of the signal to generate
             sparsity_level (int): The sparsity level of the signal
-            noise_level (float): The level of noise to add to the signal
+            snr_level (float): The SNR level between noise and the signal
         Returns:
             signal (np.ndarray): The generated test signal
             atoms_infos (dict): position : ZSAtom corresponding
@@ -121,6 +121,7 @@ class ZSDictionary() :
         # Initialize the test signal
         signal = np.zeros(signal_length)
         atoms_infos = []
+        noisesVarToSNR = []
         # Generate the linear combination of the atoms
         for idx, offset in zip(rand_atoms_idx, rand_atoms_offsets) :
             atom_signal = self.atoms[idx].getSignal()
@@ -129,27 +130,15 @@ class ZSDictionary() :
             signal += atom_offset_signal
             b, y, s = self.atoms[idx].params['b'], self.atoms[idx].params['y'], self.atoms[idx].params['sigma']
             atoms_infos.append({'x': offset, 'b': b, 'y': y, 's': s})
-        # Add noise to the signal
-        noise = noise_level * np.random.randn(signal_length)
+            noisesVarToSNR.append(self.atoms[idx].getNoiseVarToSNR(snr_level))
+        # Add noise to the signal with a given policy
+        # * noiseVar = max(noisesVarToSNR)
+        # * noiseVar = min(noisesVarToSNR)
+        # * noiseVar = avg(noisesVarToSNR)
+        noiseVar = max(noisesVarToSNR)
+        noise = np.random.normal(0, np.sqrt(noiseVar), signal_length)
         signal += noise
         return signal, atoms_infos
-    
-    def generateTestSignalBatch(self, signal_length, sparsity_level, noise_level, batch_size) -> np.ndarray:
-        """Generate a batch of test signals as linear combinations of the atoms in the dictionary
-        Args:
-            nb_atoms (int): The number of atoms to use in the linear combination
-            noise_level (float): The level of noise to add to the signal
-            nb_samples (int): The number of samples to generate
-        Returns:
-            np.ndarray: The generated batch of test signals
-        """
-        signals = np.zeros((batch_size, signal_length))
-        signals_atoms_infos = []
-        for i in range(batch_size):
-            signal, atoms_infos = self.generateTestSignal(signal_length, sparsity_level, noise_level)
-            signals[i] = signal
-            signals_atoms_infos.append(atoms_infos)
-        return signals, signals_atoms_infos
     
     def computeConvolutions(self, activations) :
         """
@@ -259,13 +248,13 @@ class ZSDictionary() :
         return approx, infos
     
     @time_decorator
-    def ompTestBatch(self, batch_size, signals_length, sparsity_level, noise_level, verbose=False) :
+    def ompTestBatch(self, batch_size, signals_length, sparsity_level, snr_level, verbose=False) :
         """Test the OMP algorithm on a batch of signals
         Args:
             batch_size (int): The number of signals to generate and test
             signals_length (int): The length of the signals to generate
             sparsity_level (int): The sparsity level of the signals
-            noise_level (float): The level of noise to add to the signals
+            snr_level (float): The level of noise to add to the signals
         Returns:
             approximations (np.ndarray): The approximations of the signals
             activations_list (list): The list of the activations of the signals
@@ -276,10 +265,10 @@ class ZSDictionary() :
         infos = []
         if verbose :
             print("~~~OMP Test Batch of {} signals ~~~".format(batch_size))
-        for i in tqdm(range(batch_size), desc='OMP Test Batch for noise_level = {:.2f}'.format(noise_level)) :
+        for i in tqdm(range(batch_size), desc='OMP Test Batch for snr_level = {:.2f}'.format(snr_level)) :
             if verbose :
                 print("========= Signal {}/{} =========".format(i+1, batch_size))
-            signal, atoms_info = self.generateTestSignal(signals_length, sparsity_level, noise_level)
+            signal, atoms_info = self.generateTestSignal(signals_length, sparsity_level, snr_level)
             approx, recov_atoms_infos = self.omp(signal, sparsity_level, verbose=verbose)
             # Store the signals and the reconstructions
             signals[i] = signal
@@ -290,6 +279,43 @@ class ZSDictionary() :
             infos.append({'original':atoms_info, 'recovered':recov_atoms_infos, 'mse': mse})
 
         return signals, reconstructions, infos
+    
+    @time_decorator
+    def ompBatchPipeline(self, batch_size, signals_length, sparsity_level, snr_level, verbose=False) :
+        """Test the OMP algorithm on a batch of signals
+        Args:
+            batch_size (int): The number of signals to generate and test
+            signals_length (int): The length of the signals to generate
+            sparsity_level (int): The sparsity level of the signals
+            snr_level (float): The level of noise to add to the signals
+        Returns:
+            approximations (np.ndarray): The approximations of the signals
+            activations_list (list): The list of the activations of the signals
+            infos_list (list): The list of atoms informations dict : the original and the recovered ones
+        """
+        results = []
+        if verbose :
+            print("====== OMP pipeline : batch size of {} signals ======".format(batch_size))
+        for i in tqdm(range(batch_size), desc='OMP Test Batch for snr_level = {:.2f}'.format(snr_level)) :
+            if verbose :
+                print("========= Signal {}/{} =========".format(i+1, batch_size))
+            
+            # Generate the signal and compute the OMP
+            signal, atoms_info = self.generateTestSignal(signals_length, sparsity_level, snr_level)
+            approx, recov_atoms_infos = self.omp(signal, sparsity_level, verbose=verbose)
+            # Compute some metrics
+            mse = np.mean((signal - approx)**2)
+            # Store the result as a dict in the results list
+            result = {
+                "original": atoms_info,
+                "recovered": recov_atoms_infos,
+                "mse" : mse,
+                "snr_level": snr_level,
+                "sparsity_level" : sparsity_level,
+                "omp_verion": "conv-omp"
+            }
+            results.append(result)
+        return result
 
     def atomsDictPositionMatchingErrors(self, atoms_info:List[dict], recov_atoms_info:List[dict]) -> List[int]:
         """Match the original atoms parameters with their recovered ones
@@ -304,16 +330,16 @@ class ZSDictionary() :
         position_errors = [recov_atoms_info[np.argmin(position_errors_combinations[i])]['x'] - atoms_info[i]['x'] for i in range(len(atoms_info))]
         return position_errors
     
-    def ompPositionErrorBatch(self, sparsity_level:int, noise_level:int, batch_size:int, verbose:bool=False) -> Counter:
+    def ompPositionErrorBatch(self, sparsity_level:int, snr_level:float, batch_size:int, verbose:bool=False) -> Counter:
         """Compute the histogram of the position errors for the OMP algorithm
         Args:
             sparsity_level (int): The sparsity level of the signals
-            noise_level (float): The level of noise to add to the signals
+            snr_level (float): The level of noise to add to the signals
             batch_size (int): The number of signals to generate and test
         Returns:
             pos_err_counter (Counter): The histogram of the position errors
         """
-        _, _, infos = self.ompTestBatch(batch_size, self.atoms_length*2, sparsity_level, noise_level, verbose=verbose)
+        _, _, infos = self.ompTestBatch(batch_size, self.atoms_length*2, sparsity_level, snr_level, verbose=verbose)
         pos_err_collection = []
         for info in infos:
             pos_err_collection.extend(self.atomsDictPositionMatchingErrors(info['original'], info['recovered']))
@@ -321,9 +347,9 @@ class ZSDictionary() :
         return pos_err_counter
 
     def ompPositionErrorPipeline(self, sparsity_level:int, batch_size:int, cores=50, verbose=False):
-        noise_levels = np.concatenate((np.arange(0.0, 0.11, 0.01), np.arange(0.12, 0.22, 0.02))) 
-        results = Parallel(n_jobs=cores)(delayed(self.ompPositionErrorBatch)(sparsity_level, noise, batch_size, verbose=verbose) for noise in noise_levels)
-        results_dict = dict(zip(noise_levels, results))
+        snr_levels = np.concatenate((np.arange(0.0, 0.11, 0.01), np.arange(0.12, 0.22, 0.02))) 
+        results = Parallel(n_jobs=cores)(delayed(self.ompPositionErrorBatch)(sparsity_level, noise, batch_size, verbose=verbose) for noise in snr_levels)
+        results_dict = dict(zip(snr_levels, results))
         results_dict_valid = dict()
         for key, counter in results_dict.items() :
             valid_dict = {float(noise) : int(count) for noise, count in counter.items()}
