@@ -1,3 +1,4 @@
+import os
 import time
 import json
 from tqdm import tqdm
@@ -15,6 +16,7 @@ from scipy.signal import oaconvolve
 from joblib import Parallel, delayed
 
 from .atoms import ZSAtom
+from .utils import *
 
 def time_decorator(func):
     def wrapper(*args, **kwargs):
@@ -139,6 +141,19 @@ class ZSDictionary() :
         noise = np.random.normal(0, np.sqrt(noiseVar), signal_length)
         signal += noise
         return signal, atoms_infos
+    
+    def atomsDictPositionMatchingErrors(self, atoms_info:List[dict], recov_atoms_info:List[dict]) -> List[int]:
+        """Match the original atoms parameters with their recovered ones
+        Args:
+            atoms_info (List[dict]): The list of the original atoms informations dict
+            recov_atoms_info (List[dict]): The list of the recovered atoms informations dict
+        Returns:
+            List[int]: The list of the matched atoms position errors
+        """
+        # Compute the matching between the original and the recovered atoms
+        position_errors_combinations = [[np.abs(atoms_info[i]['x'] - recov_atoms_info[j]['x']) for j in range(len(recov_atoms_info))] for i in range(len(atoms_info))]
+        position_errors = [recov_atoms_info[np.argmin(position_errors_combinations[i])]['x'] - atoms_info[i]['x'] for i in range(len(atoms_info))]
+        return position_errors
     
     def computeConvolutions(self, activations) :
         """
@@ -310,25 +325,45 @@ class ZSDictionary() :
                 "original": atoms_info,
                 "recovered": recov_atoms_infos,
                 "mse" : mse,
-                "snr_level": snr_level,
-                "sparsity_level" : sparsity_level,
+                "snr": snr_level,
+                "sparsity" : sparsity_level,
                 "omp_verion": "conv-omp"
             }
             results.append(result)
         return result
+    
+    def ompSNRPipeline(self, sparsity_level:int, batch_size:int, cores=50, json_filename=None, verbose=False):
+        snr_levels = np.arange(-20, 25, 15)
+        results = Parallel(n_jobs=cores)(delayed(self.ompBatchPipeline)(batch_size, self.atoms_length*2, sparsity_level, snr, verbose=verbose) for snr in snr_levels)
+        
+        # Définir le nom du fichier JSON si ce n'est pas déjà fait
+        if json_filename is None:
+            today_date = get_today_date_str()
+            json_filename = f'{today_date}_omp_batch_s{sparsity_level}.json'
+            mode = 'w+'  # créer un nouveau fichier ou écraser un fichier existant
+        else:
+            mode = 'r+'  # ouvrir pour lecture et écriture
 
-    def atomsDictPositionMatchingErrors(self, atoms_info:List[dict], recov_atoms_info:List[dict]) -> List[int]:
-        """Match the original atoms parameters with their recovered ones
-        Args:
-            atoms_info (List[dict]): The list of the original atoms informations dict
-            recov_atoms_info (List[dict]): The list of the recovered atoms informations dict
-        Returns:
-            List[int]: The list of the matched atoms position errors
-        """
-        # Compute the matching between the original and the recovered atoms
-        position_errors_combinations = [[np.abs(atoms_info[i]['x'] - recov_atoms_info[j]['x']) for j in range(len(recov_atoms_info))] for i in range(len(atoms_info))]
-        position_errors = [recov_atoms_info[np.argmin(position_errors_combinations[i])]['x'] - atoms_info[i]['x'] for i in range(len(atoms_info))]
-        return position_errors
+        # Lire et modifier le fichier JSON existant
+        if os.path.exists(json_filename):
+            with open(json_filename, mode) as json_file:
+                try:
+                    json_file.seek(0)  # aller au début du fichier
+                    data = json.load(json_file)  # charger le contenu JSON
+                    data.extend(results)  # étendre la liste existante avec de nouveaux résultats
+                    json_file.seek(0)  # revenir au début du fichier
+                    json_file.truncate()  # supprimer le contenu existant du fichier
+                    json.dump(data, json_file, indent=4, default=handle_non_serializable)  # écrire la nouvelle liste complète
+                except json.JSONDecodeError:
+                    # Gérer le cas où le fichier est vide ou mal formé
+                    json_file.seek(0)
+                    json.dump(results, json_file, indent=4, default=handle_non_serializable)
+        else:
+            # Si le fichier n'existe pas, créer un nouveau fichier et écrire les données
+            with open(json_filename, 'w') as json_file:
+                json.dump(results, json_file, indent=4, default=handle_non_serializable)
+
+        return results
     
     def ompPositionErrorBatch(self, sparsity_level:int, snr_level:float, batch_size:int, verbose:bool=False) -> Counter:
         """Compute the histogram of the position errors for the OMP algorithm
