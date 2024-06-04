@@ -104,6 +104,22 @@ class ZSDictionary() :
     
     def getAtomsLength(self) -> int :
         return self.atoms_length
+    
+    def getAtomFromParams(self, b, y, s, tolerance=1e-5):
+        """
+        Get an atom from the dictionary based on its parameters.
+
+        Args:
+            b, y, s (float): The parameters of the atom.
+            tolerance (float, optional): The tolerance for the comparison. Defaults to 1e-5.
+
+        Returns:
+            ZSAtom: The atom with the given parameters. If no such atom exists, returns None.
+        """
+        for atom in self.atoms:
+            if np.isclose(atom.b, b, atol=tolerance) and np.isclose(atom.y, y, atol=tolerance) and np.isclose(atom.sigma, s, atol=tolerance):
+                return atom
+        return None
 
     def generateTestSignal(self, signal_length, sparsity_level, snr_level) -> np.ndarray:
         """Generate a test signal as a linear combination of the atoms in the dictionary
@@ -212,6 +228,8 @@ class ZSDictionary() :
             np.ndarray: The matrix of the chosen atoms for the signal
             list: The list of dictionaries containing the parameters of each atom
         """
+        if not isinstance(signal, np.ndarray):
+            signal = np.array(signal)
         (signal_length,) = signal.shape
         nb_valid_offset = signal_length - self.atoms_length + 1
 

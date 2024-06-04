@@ -146,3 +146,15 @@ class ZSAtom() :
             np.ndarray: The ZS atom signal
         """
         return self.values
+    
+    def getAtomInSignal(self, signal_length, offset) -> np.ndarray:
+        """Returns the ZS atom signal in a signal
+        Args:
+            signal_length (int): The desired length of the signal
+            offset (int): The offset of the atom signal
+        Returns:
+            np.ndarray: The ZS atom signal in a signal
+        """
+        signal = np.zeros(signal_length)
+        signal[offset:offset + len(self)] = self.values
+        return signal
