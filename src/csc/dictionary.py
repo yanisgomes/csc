@@ -158,6 +158,45 @@ class ZSDictionary() :
         signal += noise
         return signal, atoms_infos
     
+    def generateSignalsDB(self, batch_size:int, signal_length:int, sparsity_levels:List[int], snr_levels:List[float], output_filename:str) -> None:
+        """Generate a database of signals with different SNR levels and store it in a JSON file
+        Args:
+            batch_size (int): The number of signals to generate for each SNR level
+            signals_length (int): The length of the signals to generate
+            sparsity_level (List[int]): The sparsity levels of the signals
+            snr_levels (List[float]): The list of SNR levels to generate the signals
+            output_filename (str): The name of the output file to store the signals
+        Returns:
+            None : it saves the signals in a file
+        """
+        # Initialize the database dictionary
+        db = {}
+        db['date'] = get_today_date_str()
+        db['batchSize'] = batch_size
+        db['snrLevels'] = snr_levels
+        db['signalLength'] = signal_length
+        db['sparsityLevels'] = sparsity_levels
+        db['dictionary'] = str(self)
+        # Initialize the signals list
+        idx = 0
+        signals = []
+        for snr, sparsity in product(snr_levels, sparsity_levels) :
+            for _ in range(batch_size):
+                signal, infos = self.generateTestSignal(signal_length, sparsity, snr)
+                result = {
+                    'id' : idx,
+                    'snr': snr,
+                    'sparsity': sparsity,
+                    'signal': signal.tolist(),
+                    'atoms': infos
+                }
+                signals.append(result)
+                idx += 1
+        # Save the signals in a JSON file
+        db['signals'] = signals
+        json.dump(db, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
+        print(f"Signals database saved in {output_filename}")
+    
     def atomsDictPositionMatchingErrors(self, atoms_info:List[dict], recov_atoms_info:List[dict]) -> List[int]:
         """Match the original atoms parameters with their recovered ones
         Args:
@@ -280,7 +319,26 @@ class ZSDictionary() :
 
         return approx, infos
     
-    @time_decorator
+    def ompFromDict(self, signal_dict:dict, verbose:bool=False) -> dict :
+        """Recover the sparse signal from a dictionary of the signal
+        Args:
+            signal_dict (dict): The dictionary of the signal
+        Returns:
+            result : OMP results with the dict format
+        """
+        signal = signal_dict['signal']
+        sparsity_level = len(signal_dict['atoms'])
+        approx, infos = self.omp(signal, sparsity_level, verbose=verbose)
+        mse = np.mean((signal - approx)**2)
+        omp_result = {
+            'id' : signal_dict['id'],
+            'mse' : mse,
+            'sparsity' : len(infos),
+            'approx' : approx.tolist(),
+            'atoms' : infos
+        }
+        return omp_result
+    
     def ompTestBatch(self, batch_size, signals_length, sparsity_level, snr_level, verbose=False) :
         """Test the OMP algorithm on a batch of signals
         Args:
@@ -313,101 +371,40 @@ class ZSDictionary() :
 
         return signals, reconstructions, infos
     
-    @time_decorator
-    def ompBatchPipeline(self, batch_size, signals_length, sparsity_level, snr_level, verbose=False) :
-        """Test the OMP algorithm on a batch of signals
+    def ompPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, verbose=False) :
+        """Create a pipeline of the OMP algorithm from the database of signals.
         Args:
-            batch_size (int): The number of signals to generate and test
-            signals_length (int): The length of the signals to generate
-            sparsity_level (int): The sparsity level of the signals
-            snr_level (float): The level of noise to add to the signals
+            input_filename (str): The name of the input file containing the signals database
+            output_filename (str): The name of the output file to store the results
         Returns:
-            approximations (np.ndarray): The approximations of the signals
-            activations_list (list): The list of the activations of the signals
-            infos_list (list): The list of atoms informations dict : the original and the recovered ones
+            None : it saves the results in a file
         """
-        results = []
-        if verbose :
-            print("====== OMP pipeline : batch size of {} signals ======".format(batch_size))
-        for i in tqdm(range(batch_size), desc='OMP Test Batch for snr_level = {:.2f}'.format(snr_level)) :
-            if verbose :
-                print("========= Signal {}/{} =========".format(i+1, batch_size))
-            
-            # Generate the signal and compute the OMP
-            signal, atoms_info = self.generateTestSignal(signals_length, sparsity_level, snr_level)
-            approx, recov_atoms_infos = self.omp(signal, sparsity_level, verbose=verbose)
-            # Compute some metrics
-            mse = np.mean((signal - approx)**2)
-            # Store the result as a dict in the results list
-            result = {
-                "original": atoms_info,
-                "recovered": recov_atoms_infos,
-                "mse" : mse,
-                "snr": snr_level,
-                "sparsity" : sparsity_level,
-                "omp_verion": "conv-omp"
-            }
-            results.append(result)
-        return result
-    
-    def ompSNRPipeline(self, sparsity_level:int, batch_size:int, cores=50, json_filename=None, verbose=False):
-        snr_levels = np.arange(-20, 25, 15)
-        results = Parallel(n_jobs=cores)(delayed(self.ompBatchPipeline)(batch_size, self.atoms_length*2, sparsity_level, snr, verbose=verbose) for snr in snr_levels)
+        with open(input_filename, 'r') as json_file:
+            data = json.load(json_file)
+            if data is None:
+                raise ValueError("The input file is empty or does not contain any data.")
         
-        # Définir le nom du fichier JSON si ce n'est pas déjà fait
-        if json_filename is None:
-            today_date = get_today_date_str()
-            json_filename = f'{today_date}_omp_batch_s{sparsity_level}.json'
-            mode = 'w+'  # créer un nouveau fichier ou écraser un fichier existant
-        else:
-            mode = 'r+'  # ouvrir pour lecture et écriture
+        if verbose :
+            print(f"OMP Pipeline from {input_filename} with {len(data['signals'])} signals")
 
-        # Lire et modifier le fichier JSON existant
-        if os.path.exists(json_filename):
-            with open(json_filename, mode) as json_file:
-                try:
-                    json_file.seek(0)  # aller au début du fichier
-                    data = json.load(json_file)  # charger le contenu JSON
-                    data.extend(results)  # étendre la liste existante avec de nouveaux résultats
-                    json_file.seek(0)  # revenir au début du fichier
-                    json_file.truncate()  # supprimer le contenu existant du fichier
-                    json.dump(data, json_file, indent=4, default=handle_non_serializable)  # écrire la nouvelle liste complète
-                except json.JSONDecodeError:
-                    # Gérer le cas où le fichier est vide ou mal formé
-                    json_file.seek(0)
-                    json.dump(results, json_file, indent=4, default=handle_non_serializable)
-        else:
-            # Si le fichier n'existe pas, créer un nouveau fichier et écrire les données
-            with open(json_filename, 'w') as json_file:
-                json.dump(results, json_file, indent=4, default=handle_non_serializable)
-
-        return results
+        # Extract the signals from the DB
+        signals = data['signals']
+        # Create the results dictionary
+        results = dict()
+        results['source'] = input_filename
+        results['date'] = get_today_date_str()
+        results['algorithm'] = 'Convolutional OMP'
+        results['batchSize'] = data['batchSize']
+        results['snrLevels'] = data['snrLevels']
+        results['signalLength'] = data['signalLength']
+        results['sparsityLevels'] = data['sparsityLevels']
+        results['dictionary'] = str(self)
+        # Parallelize the OMP algorithm on the signals from the DB
+        omp_results = Parallel(n_jobs=nb_cores)(delayed(self.ompFromDict)(signal_dict, verbose=verbose) for signal_dict in tqdm(signals, desc='OMP Pipeline from DB'))
+        results['omp'] = omp_results
+        # Save the results in a JSON file
+        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
+        if verbose :
+            print(f"OMP Pipeline results saved in {output_filename}")
     
-    def ompPositionErrorBatch(self, sparsity_level:int, snr_level:float, batch_size:int, verbose:bool=False) -> Counter:
-        """Compute the histogram of the position errors for the OMP algorithm
-        Args:
-            sparsity_level (int): The sparsity level of the signals
-            snr_level (float): The level of noise to add to the signals
-            batch_size (int): The number of signals to generate and test
-        Returns:
-            pos_err_counter (Counter): The histogram of the position errors
-        """
-        _, _, infos = self.ompTestBatch(batch_size, self.atoms_length*2, sparsity_level, snr_level, verbose=verbose)
-        pos_err_collection = []
-        for info in infos:
-            pos_err_collection.extend(self.atomsDictPositionMatchingErrors(info['original'], info['recovered']))
-        pos_err_counter = Counter(pos_err_collection)
-        return pos_err_counter
-
-    def ompPositionErrorPipeline(self, sparsity_level:int, batch_size:int, cores=50, verbose=False):
-        snr_levels = np.concatenate((np.arange(0.0, 0.11, 0.01), np.arange(0.12, 0.22, 0.02))) 
-        results = Parallel(n_jobs=cores)(delayed(self.ompPositionErrorBatch)(sparsity_level, noise, batch_size, verbose=verbose) for noise in snr_levels)
-        results_dict = dict(zip(snr_levels, results))
-        results_dict_valid = dict()
-        for key, counter in results_dict.items() :
-            valid_dict = {float(noise) : int(count) for noise, count in counter.items()}
-            results_dict_valid[int(key)] = valid_dict
-        # Convertir les résultats en JSON et les enregistrer dans un fichier
-        with open(f'output_posErrPipeline_s{sparsity_level}_b{batch_size}.json', 'w') as json_file:
-            json.dump(results_dict_valid, json_file, indent=4) 
-        return results_dict_valid
+        
