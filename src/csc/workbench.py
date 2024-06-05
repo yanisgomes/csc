@@ -131,7 +131,39 @@ class CSCWorkbench:
         """
         Plot the boxplot of the position errors.
         """
+        plt.figure(figsize=(12, 8)) 
         data_errors = self.computePositionErrors(db_path)
         df = pd.DataFrame(data_errors)
-        sns.boxplot(x='snr', y='position_error', data=df)
+        #sns.boxplot(x='snr', y='position_error', hue='sparsity', data=df)
+        #sns.color_palette("flare", as_cmap=True)
+        sns.color_palette("crest", as_cmap=True)
+        sns.boxplot(x='snr', y='position_error', hue='sparsity', data=df, palette="flare", fliersize=2, whis=1.5)
+        plt.yscale('log')  # Échelle logarithmique pour l'axe des y
+        plt.title('OMP boxplot of Position Errors by SNR and Sparsity', fontsize=14)
+        plt.xlabel('Signal to Noise Ratio (SNR) in dB', fontsize=12)
+        plt.ylabel('Position Error', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.legend(title='Sparsity Level', loc='upper left')
+        plt.show()
+
+    def violinplotPositionErrors(self, db_path:str) :
+        """
+        Plot the boxplot of the position errors.
+        """
+        plt.figure(figsize=(12, 8)) 
+        data_errors = self.computePositionErrors(db_path)
+        df = pd.DataFrame(data_errors)
+        #sns.boxplot(x='snr', y='position_error', hue='sparsity', data=df)
+        #sns.color_palette("flare", as_cmap=True)
+        sns.color_palette("crest", as_cmap=True)
+        sns.violinplot(x='snr', y='position_error', hue='sparsity', data=df, inner="box", palette="crest", alpha=0.6)
+        plt.yscale('log')  # Échelle logarithmique pour l'axe des y
+        plt.title('OMP violinplot of Position Errors by SNR and Sparsity', fontsize=14)
+        plt.xlabel('Signal to Noise Ratio (SNR) in dB', fontsize=12)
+        plt.ylabel('Position Error', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.legend(title='Sparsity Level', loc='upper left')
+        plt.grid(True, which="both", ls="--", linewidth=0.5)
         plt.show()
