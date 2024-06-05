@@ -6,6 +6,7 @@ import seaborn as sns
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from typing import List, Dict, Tuple, Any, Union
+from scipy.optimize import linear_sum_assignment 
 
 from .dictionary import ZSDictionary
 from .atoms import ZSAtom
@@ -78,6 +79,24 @@ class CSCWorkbench:
             closest_atom = min(approx_atoms, key=lambda approx: abs(approx['x'] - true_atom['x']))
             matched_atoms.append((true_atom, closest_atom))
         return matched_atoms
+
+    @staticmethod
+    def positionMatching(true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[Tuple[ZSAtom,ZSAtom]]:
+        """
+        Match the atoms of the true and approximation dictionaries using the Hungarian algorithm.
+        Args:
+            true_atoms (List[ZSAtom]): Atoms of the true dictionary.
+            approx_atoms (List[ZSAtom]): Atoms of the approximation dictionary.
+        Returns:
+            List[Tuple[ZSAtom,ZSAtom]]: List of tuples with the matching atoms.
+        """
+        true_positions = np.array([atom['x'] for atom in true_atoms])
+        approx_positions = np.array([atom['x'] for atom in approx_atoms])
+        cost_matrix = np.abs(true_positions[:, np.newaxis] - approx_positions)
+        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+        matched_atoms = [(true_atoms[i], approx_atoms[j]) for i, j in zip(row_ind, col_ind)]
+        return matched_atoms
+    
     
     @staticmethod
     def positionError(true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[int]:
@@ -137,14 +156,15 @@ class CSCWorkbench:
         #sns.boxplot(x='snr', y='position_error', hue='sparsity', data=df)
         #sns.color_palette("flare", as_cmap=True)
         sns.color_palette("crest", as_cmap=True)
-        sns.boxplot(x='snr', y='position_error', hue='sparsity', data=df, palette="flare", fliersize=2, whis=1.5)
-        plt.yscale('log')  # Échelle logarithmique pour l'axe des y
+        sns.boxplot(x='snr', y='position_error', hue='sparsity', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
+        sns.despine(trim=True)
+        #plt.yscale('log')  # Échelle logarithmique pour l'axe des y
         plt.title('OMP boxplot of Position Errors by SNR and Sparsity', fontsize=14)
         plt.xlabel('Signal to Noise Ratio (SNR) in dB', fontsize=12)
         plt.ylabel('Position Error', fontsize=12)
         plt.xticks(fontsize=10)
         plt.yticks(fontsize=10)
-        plt.legend(title='Sparsity Level', loc='upper left')
+        plt.legend(title='Sparsity', loc='best')
         plt.show()
 
     def violinplotPositionErrors(self, db_path:str) :
@@ -157,13 +177,13 @@ class CSCWorkbench:
         #sns.boxplot(x='snr', y='position_error', hue='sparsity', data=df)
         #sns.color_palette("flare", as_cmap=True)
         sns.color_palette("crest", as_cmap=True)
-        sns.violinplot(x='snr', y='position_error', hue='sparsity', data=df, inner="box", palette="crest", alpha=0.6)
-        plt.yscale('log')  # Échelle logarithmique pour l'axe des y
+        sns.violinplot(x='snr', y='position_error', hue='sparsity', data=df, inner="box", palette="crest", alpha=0.6, cut=0)
+        sns.despine(trim=True)
+        #plt.yscale('log')  # Échelle logarithmique pour l'axe des y
         plt.title('OMP violinplot of Position Errors by SNR and Sparsity', fontsize=14)
         plt.xlabel('Signal to Noise Ratio (SNR) in dB', fontsize=12)
         plt.ylabel('Position Error', fontsize=12)
         plt.xticks(fontsize=10)
         plt.yticks(fontsize=10)
-        plt.legend(title='Sparsity Level', loc='upper left')
-        plt.grid(True, which="both", ls="--", linewidth=0.5)
+        plt.legend(title='Sparsity', loc='best')
         plt.show()
