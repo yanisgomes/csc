@@ -70,8 +70,8 @@ class ZSAtom() :
         self.position = self.x - self.x[0]
 
     @classmethod
-    def from_params(cls, params) -> 'ZSAtom':
-        return cls(params['b'], params['y'], params['sigma'])
+    def from_dict(cls, params) -> 'ZSAtom':
+        return cls(params['b'], params['y'], params['s'])
 
     def __str__(self) -> str:
         return "b={:.2f}, y={:.2f}, sigma={:.2e}".format(self.params['b'], self.params['y'], self.params['sigma'])
