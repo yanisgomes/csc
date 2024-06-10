@@ -120,6 +120,38 @@ class ZSDictionary() :
             if np.isclose(atom.b, b, atol=tolerance) and np.isclose(atom.y, y, atol=tolerance) and np.isclose(atom.sigma, s, atol=tolerance):
                 return atom
         return None
+    
+    def atomsSimilarTo(self, atom:ZSAtom, threshold=0.95) -> List[ZSAtom]:
+        """
+        Get a list of atoms similar to the given atom based on its parameters.
+
+        Args:
+            atom (ZSAtom): The atom to compare with.
+            tolerance (float, optional): The tolerance for the comparison. Defaults to 1e-5.
+
+        Returns:
+            List[ZSAtom]: A list of atoms similar to the given atom.
+        """
+        correlations = self.computeCorrelations(atom())
+        print()
+        similar_atoms = [self.atoms[i] for i in np.where(correlations > threshold)[0]]
+        return similar_atoms
+    
+    def atomsSimilarToParams(self, b, y, s, tolerance=1e-5) -> List[ZSAtom]:
+        """
+        Get a list of atoms similar to the given atom based on its parameters.
+
+        Args:
+            atom (ZSAtom): The atom to compare with.
+            tolerance (float, optional): The tolerance for the comparison. Defaults to 1e-5.
+
+        Returns:
+            List[ZSAtom]: A list of atoms similar to the given atom.
+        """
+        atom = self.getAtomFromParams(b, y, s, tolerance=tolerance)
+        if atom is None:
+            return []
+        return self.atomsSimilarTo(atom, tolerance=tolerance)
 
     def generateTestSignal(self, signal_length, sparsity_level, snr_level) -> np.ndarray:
         """Generate a test signal as a linear combination of the atoms in the dictionary
@@ -156,6 +188,7 @@ class ZSDictionary() :
         noiseVar = max(noisesVarToSNR)
         noise = np.random.normal(0, np.sqrt(noiseVar), signal_length)
         signal += noise
+        signal /= np.linalg.norm(signal)
         return signal, atoms_infos
     
     def generateSignalsDB(self, batch_size:int, signal_length:int, sparsity_levels:List[int], snr_levels:List[float], output_filename:str) -> None:
@@ -238,6 +271,23 @@ class ZSDictionary() :
         stacked_signals = np.stack([signal] * len(self.atoms), axis=1)  
         all_correlations = oaconvolve(stacked_signals, atom_signals.T, mode='valid', axes=0)
         return all_correlations
+
+    def computeConvolutionsOnSubDict(self, activations, removed_atoms=List[ZSAtom]) :
+        """
+        This funcion is the matvec function of the MaskedConvOperator
+        that computes the convolution of the activations with the dictionary
+        It reconstructs the signal from the activations and the dictionary
+        Args:
+            activations (np.ndarray): The activations of the signal
+            removed_atoms (List[ZSAtom]): The list of atoms to remove from the dictionary
+        Returns:
+            np.ndarray: The reconstructed signal from the activations and the dictionary
+        """
+        similarAtoms = [similar for atom in removed_atoms for similar in self.atomsSimilarTo(atom)]
+        atoms_signals = np.array([atom() for atom in self.atoms if atom not in removed_atoms])
+        activations = np.reshape(activations, (-1, len(self.atoms)))
+        convolutions = oaconvolve(activations, atoms_signals.T, mode='full', axes=0).sum(axis=1)
+        return convolutions
     
     def getMaskedConvOperator(self, activation_mask) :
         """Return a LinearOperator that masks and does the convolution."""

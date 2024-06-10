@@ -74,7 +74,7 @@ class ZSAtom() :
         return cls(params['b'], params['y'], params['s'])
 
     def __str__(self) -> str:
-        return "b={:.2f}, y={:.2f}, sigma={:.2e}".format(self.params['b'], self.params['y'], self.params['sigma'])
+        return "b={:.3f}, y={:.3f}, sigma={:.3e}".format(self.params['b'], self.params['y'], self.params['sigma'])
 
     def __getitem__(self, key):
         return self.params.get(key, None)
