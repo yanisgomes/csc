@@ -151,7 +151,7 @@ class CSCWorkbench:
             'pos_err': []
         }
         # Iterate over the outputs
-        for result in output_data['omp'] :
+        for result in output_data['signals'] :
             # Get signal and approximation atoms
             signal_id = result['id']
             signal_dict = self.signalDictFromId(signal_id)
@@ -183,7 +183,7 @@ class CSCWorkbench:
             'algo_step': []
         }
         # Iterate over the outputs
-        for result in output_data['omp'] :
+        for result in output_data['signals'] :
             # Get signal and approximation atoms
             signal_id = result['id']
             signal_dict = self.signalDictFromId(signal_id)
@@ -277,7 +277,7 @@ class CSCWorkbench:
         # Load the data
         with open(db_path, 'r') as f:
             output_data = json.load(f)
-            approxs_dict = [result for id in ids for result in output_data['omp'] if result['id'] == id]
+            approxs_dict = [result for id in ids for result in output_data['signals'] if result['id'] == id]
         # Plot the comparison
         fig, axs = plt.subplots(len(ids), 1, figsize=(12, 4*len(ids)), sharex=True)
         for i, approx_dict in enumerate(approxs_dict):
@@ -305,7 +305,7 @@ class CSCWorkbench:
         # Load the data
         with open(db_path, 'r') as f:
             output_data = json.load(f)
-            approx_dict = next((result for result in output_data['omp'] if result['id'] == id), None)
+            approx_dict = next((result for result in output_data['signals'] if result['id'] == id), None)
         # Get the true signal
         signal_dict = self.signalDictFromId(id)
         # Plot the comparison
