@@ -16,7 +16,7 @@ from .atoms import ZSAtom
 from .utils import *
 
 class MMPNode:
-    def __init__(self, dictionary:ZSDictionary, atom_pos:int, atom_idx:int, residual:np.ndarray, parent=None):
+    def __init__(self, node_idx:int, dictionary:ZSDictionary, atom_pos:int, atom_idx:int, residual:np.ndarray, parent=None):
         """
         Initialize an MMP node.
 
@@ -28,33 +28,25 @@ class MMPNode:
         """
         # Initialize the dictionary and the atom
         self.dictionary = dictionary
-        self, atom_pos = atom_pos
+        self.atom_pos = atom_pos
         self.atom_idx = atom_idx
         self.atom = dictionary.getAtom(atom_idx)
-        self.atom_signal = self.atom.getAtomInSignal(signal_length=len(residual))
+        self.atom_signal = self.atom.getAtomInSignal(signal_length=len(residual), offset=self.atom_pos)
+        self.atom_info = {'x':self.atom_pos, 'b':self.atom.b, 'y':self.atom.y, 'sigma':self.atom.sigma}
         
+        # Initialize the residual signal
         self.residual = residual
+        self.mse = np.linalg.norm(self.residual)**2
+
+        # Initialize the parent node for backtracking
         self.parent = parent
         self.children = []
 
-    def compute_approximation(self):
-        """
-        Compute the signal approximation based on the current set of indices.
-        """
-        approx = np.copy(self.parent_approximation)
-        for idx in self.indices:
-            atom = self.dictionary.get_atom(idx)
-            projection = np.dot(self.residual, atom) * atom
-            approx += projection
-            self.residual -= projection
-        return approx
-
-    def add_child(self, atom_idx):
+    def add_child(self, node_idx:int, atom_pos:int, atom_idx:int):
         """
         Add a child node to the current node with an additional atom in the approximation.
         """
-        new_indices = self.indices + [new_index]
-        new_residual = self.signal
-        child_node = MMPNode(atom_idx, self.dictionary, new_residual, self.current_approximation)
+        new_residual = self.residual - self.atom_signal
+        child_node = MMPNode(node_idx, self.dictionary, atom_pos, atom_idx, new_residual, parent=self)
         self.children.append(child_node)
         return child_node
