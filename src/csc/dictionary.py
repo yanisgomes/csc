@@ -15,6 +15,7 @@ from scipy.signal import oaconvolve
 
 from joblib import Parallel, delayed
 
+from .mmp_node import MMPNode
 from .atoms import ZSAtom
 from .utils import *
 
@@ -98,6 +99,9 @@ class ZSDictionary() :
 
     def disable_timing(self):
         self.timing_enabled = False
+
+    def getAtom(self, idx:int) -> ZSAtom:
+        return self.atoms[idx]
 
     def getAtoms(self) -> List[ZSAtom] :
         return self.atoms
@@ -456,5 +460,12 @@ class ZSDictionary() :
         json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
         if verbose :
             print(f"OMP Pipeline results saved in {output_filename}")
-    
-        
+
+    @time_decorator
+    def mmp(self, signal:np.ndarray, sparsity_level:int, verbose:bool=False) -> Tuple[np.ndarray, List[dict]]:
+        """Multipath Matching Pursuit algorithm to recover the sparse signal
+        Args:
+            signal (np.ndarray): The input signal to recover
+            sparsity_level (int): The sparsity level of the signal
+        """
+        root = MMPNode(dictionary=self, atoms_idx=[], residual=signal)
