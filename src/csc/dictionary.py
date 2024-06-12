@@ -15,7 +15,7 @@ from scipy.signal import oaconvolve
 
 from joblib import Parallel, delayed
 
-from .mmp_node import MMPNode
+from .mmp import  *
 from .atoms import ZSAtom
 from .utils import *
 
@@ -468,4 +468,4 @@ class ZSDictionary() :
             signal (np.ndarray): The input signal to recover
             sparsity_level (int): The sparsity level of the signal
         """
-        root = MMPNode(dictionary=self, atoms_idx=[], residual=signal)
+        pass
