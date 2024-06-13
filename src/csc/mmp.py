@@ -146,8 +146,6 @@ class MMPNode:
         child_masked_correlations = self.getChildrenMaskedCorrelations()
         max_corr_idx = child_masked_correlations.argmax()
         self.children.append(MMPNode(self.dictionary, self.residual, max_corr_idx, parent=self))
-        if verbose :
-            print(f"Added child node with activation index {max_corr_idx}")
         return self.children[-1]
         
     def buildBranches(self, nb_branches:int) -> List['MMPNode'] :
@@ -207,6 +205,16 @@ class MMPTree() :
             path.append(temp % self.connections + 1)
             temp = temp // self.connections
         return tuple(path)
+
+    def getCandidateNumber(self, path:List[int]) -> int :   
+        """
+        Get the candidate number from a path of atom indices.
+        """
+        assert len(path) == self.sparsity, "The path must have the same length as the sparsity"
+        candidate_number = 1
+        for i, node_order in enumerate(path) :
+            candidate_number += (node_order - 1) * self.connections ** i
+        return candidate_number
 
     def buildBranchFromPath(self, path:List[int], verbose=False) :
         """
@@ -298,5 +306,38 @@ class MMPTree() :
             axs[i+1].plot(leaf.getAtomSignal(), label=f'{str(leaf.atom)}')
             axs[i+1].legend()
             axs[i+1].axis('off')
+
+        plt.show()
+
+    def plotOMPComparison(self) :
+
+        fig, axs = plt.subplots(3, 1, figsize=(15, 15), sharex=True)
+
+        omp_leaf = self.leaves_nodes[0]
+        mmp_leaf = self.leaves_nodes[np.argmin([leaf.getMSE() for leaf in self.leaves_nodes])]
+
+        # Compare the OMP and MMP approximations
+        axs[0].plot(self.signal, label='Original signal', color='k', alpha=0.4, lw=3)
+        axs[0].plot(omp_leaf.buildSignalRecovery(), label='OMP reconstruction')
+        axs[0].plot(mmp_leaf.buildSignalRecovery(), label='MMP reconstruction')
+        axs[0].set_title('Comparison of the OMP and MMP approximations')
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+
+        # Plot the atom signals of the OMP leaf
+        axs[1].plot(self.signal, label='Original signal', color='k', alpha=0.4, lw=3)
+        for node in omp_leaf.getGenealogy() :
+            axs[1].plot(node.getAtomSignal(), label=f'{str(node.atom)}')
+        axs[1].set_title('Atom decomposition for the OMP leaf')
+        axs[1].legend(loc='best')   
+        axs[1].axis('off')
+
+        # Plot the atom signals of the MMP leaf
+        axs[2].plot(self.signal, label='Original signal', color='k', alpha=0.4, lw=3)
+        for node in mmp_leaf.getGenealogy() :
+            axs[2].plot(node.getAtomSignal(), label=f'{str(node.atom)}')
+        axs[2].set_title('Atom decomposition for the MMP leaf')
+        axs[2].legend(loc='best')
+        axs[2].axis('off')
 
         plt.show()
