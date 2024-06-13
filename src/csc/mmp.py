@@ -309,35 +309,40 @@ class MMPTree() :
 
         plt.show()
 
-    def plotOMPComparison(self) :
+    def plotLeavesComparisonFromIdx(self, idx1:int, idx2:int) :
+        """
+        Plot the comparison between two leaves.
+        """
+        leaf1 = self.leaves_nodes[idx1]
+        leaf2 = self.leaves_nodes[idx2]
 
-        fig, axs = plt.subplots(3, 1, figsize=(15, 15), sharex=True)
+        fig, axs = plt.subplots(3, 1, figsize=(12, 12), sharex=True)
 
-        omp_leaf = self.leaves_nodes[0]
-        mmp_leaf = self.leaves_nodes[np.argmin([leaf.getMSE() for leaf in self.leaves_nodes])]
-
-        # Compare the OMP and MMP approximations
         axs[0].plot(self.signal, label='Original signal', color='k', alpha=0.4, lw=3)
-        axs[0].plot(omp_leaf.buildSignalRecovery(), label='OMP reconstruction')
-        axs[0].plot(mmp_leaf.buildSignalRecovery(), label='MMP reconstruction')
-        axs[0].set_title('Comparison of the OMP and MMP approximations')
+        axs[0].plot(leaf1.buildSignalRecovery(), label='Leaf n°{}'.format(idx1))
+        axs[0].plot(leaf2.buildSignalRecovery(), label='Leaf n°{}'.format(idx2))
+        axs[0].set_title('Comparison of the approximations')
         axs[0].legend(loc='best')
         axs[0].axis('off')
 
-        # Plot the atom signals of the OMP leaf
         axs[1].plot(self.signal, label='Original signal', color='k', alpha=0.4, lw=3)
-        for node in omp_leaf.getGenealogy() :
+        for node in leaf1.getGenealogy() :
             axs[1].plot(node.getAtomSignal(), label=f'{str(node.atom)}')
-        axs[1].set_title('Atom decomposition for the OMP leaf')
-        axs[1].legend(loc='best')   
+        axs[1].set_title('Atom decomposition for leaf n°{}'.format(idx1))
+        axs[1].legend(loc='best')
         axs[1].axis('off')
 
-        # Plot the atom signals of the MMP leaf
         axs[2].plot(self.signal, label='Original signal', color='k', alpha=0.4, lw=3)
-        for node in mmp_leaf.getGenealogy() :
+        for node in leaf2.getGenealogy() :
             axs[2].plot(node.getAtomSignal(), label=f'{str(node.atom)}')
-        axs[2].set_title('Atom decomposition for the MMP leaf')
+        axs[2].set_title('Atom decomposition for leaf n°{}'.format(idx2))
         axs[2].legend(loc='best')
         axs[2].axis('off')
 
         plt.show()
+
+    def plotOMPComparison(self) :
+        """
+        Plot the comparison between the OMP and the MMP algorithms.
+        """
+        self.plotLeavesComparisonFromIdx(0, np.argmin([leaf.getMSE() for leaf in self.leaves_nodes]))
