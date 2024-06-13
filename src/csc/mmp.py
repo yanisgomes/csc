@@ -75,6 +75,9 @@ class MMPNode:
     
     def isLeaf(self) -> bool:
         return len(self.children) == 0
+    
+    def getMSE(self) -> float:
+        return np.mean(self.residual ** 2)
 
     def getDepth(self) -> int:
         return len(np.where(self.activation_mask)[0])
@@ -86,6 +89,22 @@ class MMPNode:
         if self.isRoot() :
             return None
         return self.atom
+    
+    def getAtomSignal(self) -> np.ndarray:
+        if self.isRoot() :
+            return None
+        return self.atom_signal
+    
+    def getGenealogy(self) -> List['MMPNode']:
+        """
+        Return the genealogy of the current node.
+        """
+        genealogy = list()
+        current_node = self
+        while not current_node.isRoot() :
+            genealogy.append(current_node)
+            current_node = current_node.parent
+        return genealogy
 
     def getChildrenIndex(self) -> int :
         """
@@ -142,7 +161,19 @@ class MMPNode:
         while(len(self.children) < nb_branches) :
             self.addChildNode()
         return self.children
-        
+    
+    def getResidual(self) -> np.ndarray:
+        return self.residual
+    
+    def buildSignalRecovery(self) -> np.ndarray:
+        """
+        Build the approximation of the signal from the root to the current node.
+        """
+        if self.isRoot() :
+            return np.zeros_like(self.signal)
+        else :
+            return self.parent.buildSignalRecovery() + self.atom_signal
+    
 class MMPTree() :
 
     def __init__(self, dictionary:ZSDictionary, signal:np.ndarray, sparsity:int, connections:int) :
@@ -203,34 +234,69 @@ class MMPTree() :
         first_path = self.getCandidatePath(1)
         self.leaves_paths.append(first_path)
         # Add branches in a serial manner
-        branch_counter = 0
+        branch_counter = 1
         while len(self.leaves_paths) <= branches_number :
             # Depth-first search for the next path
             if verbose :
-                print(f"Branch n°{branch_counter} exploring path : {self.leaves_paths[-1]}")
+                print(f">> Branch n°{branch_counter} exploring path : {self.leaves_paths[-1]}")
             next_path = self.getCandidatePath(len(self.leaves_paths) + 1)
             self.leaves_paths.append(next_path)
             self.leaves_nodes.append(self.buildBranchFromPath(next_path, verbose=verbose))
             branch_counter += 1
 
-    def plotTree(self) :
+    def printLeaves(self) :
         """
-        Plot the tree structure.
+        Print the leaves of the tree.
         """
-        current_layer = [(0, (0, 0))] # Tuple (node_id, (x_position, y_position))
-        for layer in range(1, self.sparsity + 1) :
-            next_layer = []
-            width = 2 ** (self.sparsity - layer)
-            for parent_id, parent_pos in current_layer :
-                start_x = parent_pos[0] - (self.connections - 1) * width / 2
-                for i in range(self.connections) :
-                    last_node_id = parent_id * self.connections + i + 1
-                    x_pos = start_x + i * width
-                    self.graph.add_node(last_node_id, pos=(x_pos, -layer), mmp_node=None)
-                    self.graph.add_edge(parent_id, last_node_id)
-                    next_layer.append((last_node_id, (x_pos, -layer)))
-            current_layer = next_layer
-        pos = nx.get_node_attributes(self.graph, 'pos')
-        nx.draw(self.graph, pos, with_labels=False, node_color='gray', edge_color='black', node_size=700, font_size=12)
-        plt.title("Generated MMP Tree")
+        for i, leaf in enumerate(self.leaves_nodes) :
+            print(f'Branch n°{i+1} leaf with MSE = {leaf.getMSE()}')
+
+    def plotLeavesComparison(self) :
+        """
+        Plot the comparison of the leaves of the tree.
+        """
+        # Build the figure
+        nb_leaves = len(self.leaves_nodes)
+        fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
+
+        # First plot all the leaves approximations
+        axs[0].plot(self.signal, label='Original signal', color='k', alpha=0.4, lw=3)
+        argmin_mse = np.argmin([leaf.getMSE() for leaf in self.leaves_nodes])
+        for i, leaf in enumerate(self.leaves_nodes) :
+            axs[0].plot(leaf.buildSignalRecovery(), label='Leaf n°{} : MSE = {:.2e}'.format(i, leaf.getMSE()))
+        axs[0].set_title('Comparison of the leaves approximations')
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+
+        # Plot the atom signals of the best leaf
+        axs[1].plot(self.signal, label='Original signal', color='k', alpha=0.4, lw=3)
+        for node in self.leaves_nodes[argmin_mse].getGenealogy() :
+            axs[1].plot(node.getAtomSignal(), label=f'{str(node.atom)}')
+        axs[1].set_title('Atom decomposition for the argmin(MSE) leaf')
+        axs[1].legend(loc='best')
+        axs[1].axis('off')
+
+        plt.show()
+
+    def plotLeafDecomposition(self, leaf_idx:int) :
+        """
+        Plot the decomposition of a leaf.
+        """
+        leaf = self.leaves_nodes[leaf_idx]
+        leaf_genealogy = leaf.getGenealogy()
+        leaf_genealogy.reverse()
+
+        fig, axs = plt.subplots(len(leaf_genealogy)+1, 1, figsize=(12, 3*len(leaf_genealogy)+1))
+        
+        axs[0].plot(self.signal, label='Original signal', color='k', alpha=0.4, lw=3)
+        axs[0].plot(leaf.buildSignalRecovery(), label='Approximation')
+        axs[0].legend()
+        axs[0].axis('off')
+
+        for i, leaf in enumerate(leaf_genealogy) :
+            axs[i+1].plot(leaf.signal, label="Local leaf's residual", color='k', alpha=0.4, lw=3)
+            axs[i+1].plot(leaf.getAtomSignal(), label=f'{str(leaf.atom)}')
+            axs[i+1].legend()
+            axs[i+1].axis('off')
+
         plt.show()
