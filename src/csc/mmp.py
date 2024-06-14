@@ -226,6 +226,17 @@ class MMPNode:
             return np.zeros_like(self.signal)
         else :
             return self.parent.buildSignalRecovery() + self.atom_signal
+        
+
+    def getFullBranchAtoms(self) -> Dict:
+        """
+        Edit the full-blown dictionary of the node by concatenating atom_info dictionaries
+        from parent nodes recursively.
+        """
+        if not self.isRoot():
+            return self.parent.editFullBlownDict() + [self.atom_info]  
+        else :
+            return []
     
 class MMPTree() :
 
@@ -307,6 +318,17 @@ class MMPTree() :
             # Build the branch from the path
             self.leaves_nodes.append(self.MMPDFBranchFromPath(self.leaves_paths[-1], verbose=verbose))
             branch_counter += 1
+
+    def getResult(self) -> Tuple[np.ndarray, List[dict]]:
+        """
+        Get the approximation of the signal from the leaves.
+        Returns:
+            Tuple[np.ndarray, List[dict]]: The approximation and the atoms info
+        """
+        argmin_mse = np.argmin([leaf.getMSE() for leaf in self.leaves_nodes])
+        approx = self.leaves_nodes[argmin_mse].buildSignalRecovery()
+        infos = self.leaves_nodes[argmin_mse].getFullBranchAtoms()
+        return approx, infos
 
     def printLeaves(self) :
         """
@@ -402,3 +424,17 @@ class MMPTree() :
         Plot the comparison between the OMP and the MMP algorithms.
         """
         self.plotLeavesComparisonFromIdx(0, np.argmin([leaf.getMSE() for leaf in self.leaves_nodes]))
+
+    def buildMMPTreeDict(self) -> Dict:
+        """
+        Build the dictionary of the MMPTree.
+        """
+        mmp_tree_dict = {}
+        for path, leaf in zip(self.leaves_paths, self.leaves_nodes) :
+            str_path = '-'.join([str(p) for p in path])
+            mmp_tree_dict[str_path] = dict()
+            mmp_tree_dict[str_path]['mse'] = leaf.getMSE()
+            mmp_tree_dict[str_path]['atoms'] = leaf.getFullBranchAtoms()
+        return mmp_tree_dict
+    
+    

@@ -310,6 +310,12 @@ class ZSDictionary() :
 
         # Return the composition of the two operators
         return conv_operator @ mask_operator
+    
+    #               ______     __    __     ______  
+    #              /\  __ \   /\ "-./  \   /\  == \ 
+    #              \ \ \/\ \  \ \ \-./\ \  \ \  _-/ 
+    #               \ \_____\  \ \_\ \ \_\  \ \_\   
+    #                \/_____/   \/_/  \/_/   \/_/                                     
 
     @time_decorator
     def omp(self, signal:np.ndarray, sparsity_level:int, verbose:bool=False) -> Tuple[np.ndarray, List[dict]]:
@@ -461,11 +467,93 @@ class ZSDictionary() :
         if verbose :
             print(f"OMP Pipeline results saved in {output_filename}")
 
-    @time_decorator
-    def mmp(self, signal:np.ndarray, sparsity_level:int, verbose:bool=False) -> Tuple[np.ndarray, List[dict]]:
-        """Multipath Matching Pursuit algorithm to recover the sparse signal
+#            .         .                     .         .                          
+#           ,8.       ,8.                   ,8.       ,8.          8 888888888o   
+#          ,888.     ,888.                 ,888.     ,888.         8 8888    `88. 
+#         .`8888.   .`8888.               .`8888.   .`8888.        8 8888     `88 
+#        ,8.`8888. ,8.`8888.             ,8.`8888. ,8.`8888.       8 8888     ,88 
+#       ,8'8.`8888,8^8.`8888.           ,8'8.`8888,8^8.`8888.      8 8888.   ,88' 
+#      ,8' `8.`8888' `8.`8888.         ,8' `8.`8888' `8.`8888.     8 888888888P'  
+#     ,8'   `8.`88'   `8.`8888.       ,8'   `8.`88'   `8.`8888.    8 8888         
+#    ,8'     `8.`'     `8.`8888.     ,8'     `8.`'     `8.`8888.   8 8888         
+#   ,8'       `8        `8.`8888.   ,8'       `8        `8.`8888.  8 8888         
+#  ,8'         `         `8.`8888. ,8'         `         `8.`8888. 8 8888         
+#  
+
+    def mmpdf(self, signal:np.ndarray, sparsity_level:int, connections_level:int, nb_branches:int, verbose:bool=False) -> Tuple[np.ndarray, List[dict]]:
+        """ Multipath Matching Pursuit algorithm to recover the sparse signal
         Args:
             signal (np.ndarray): The input signal to recover
             sparsity_level (int): The sparsity level of the signal
+        Returns:
+            np.ndarray: The matrix of the chosen atoms for the signal
+            list: The list of dictionaries containing the parameters of each atom
         """
-        pass
+        mmp_tree = MMPTree(dictionary=self, signal=signal, sparsity=sparsity_level, connections=connections_level)
+        mmp_tree.runMMPDF(branches_number=nb_branches, verbose=verbose)
+        approx, infos = mmp_tree.getResult()
+        return approx, infos
+
+    def mmpdfFromDict(self, signal_dict:dict, connections_level:int, nb_branches:int, verbose:bool=False) -> dict :
+        """Recover the sparse signal from a dictionary of the signal
+        Args:
+            signal_dict (dict): The dictionary of the signal
+        Returns:
+            result : MMP results with the dict format
+        """
+        # Extract the signal and the sparsity level
+        signal = signal_dict['signal']
+        sparsity_level = len(signal_dict['atoms'])
+        # Run the MMPDF algorithm
+        mmp_tree = MMPTree(dictionary=self, signal=signal, sparsity=sparsity_level, connections=connections_level)
+        mmp_tree.runMMPDF(branches_number=nb_branches, verbose=verbose)
+        mmp_tree_dict = mmp_tree.buildMMPTreeDict()
+        omp_result = {
+            'id' : signal_dict['id'],
+            'sparsity' : sparsity_level,
+            'mmp-tree' : mmp_tree_dict
+        }
+        return omp_result
+    
+    def mmpdfPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, verbose=False) :
+        """Create a pipeline of the OMP algorithm from the database of signals.
+        Args:
+            input_filename (str): The name of the input file containing the signals database
+            output_filename (str): The name of the output file to store the results
+        Returns:
+            None : it saves the results in a file
+        """
+        with open(input_filename, 'r') as json_file:
+            data = json.load(json_file)
+            if data is None:
+                raise ValueError("The input file is empty or does not contain any data.")
+        
+        if verbose :
+            print(f"MMP-DF Pipeline from {input_filename} with {len(data['signals'])} signals")
+
+        # MMP-DF parameters
+        connections = 3
+        nb_branches = 10
+
+        # Extract the signals from the DB
+        signals = data['signals']
+        # Create the results dictionary
+        results = dict()
+        results['source'] = input_filename
+        results['date'] = get_today_date_str()
+        results['algorithm'] = 'Convolutional MMP-DF'
+        results['nbBranches'] = nb_branches
+        results['connections'] = connections
+        results['batchSize'] = data['batchSize']
+        results['snrLevels'] = data['snrLevels']
+        results['signalLength'] = data['signalLength']
+        results['sparsityLevels'] = data['sparsityLevels']
+        results['dictionary'] = str(self)
+
+        # Parallelize the OMP algorithm on the signals from the DB
+        mmpdf_results = Parallel(n_jobs=nb_cores)(delayed(self.mmpdfFromDict)(signal_dict, connections_level=connections, nb_branches=nb_branches, verbose=verbose) for signal_dict in tqdm(signals, desc='MMP-DF Pipeline from DB'))
+        results['mmp'] = mmpdf_results
+        # Save the results in a JSON file
+        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
+        if verbose :
+            print(f"MMP-DF Pipeline results saved in {output_filename}")
