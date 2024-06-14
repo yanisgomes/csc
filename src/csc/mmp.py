@@ -128,11 +128,11 @@ class MMPNode:
         """
         if self.isRoot() :
             return 0
-        return self.parent.children.index(self)
-    
-    def getGenealogyStr(self) -> List['MMPNode']:
+        return self.parent.children.index(self) + 1
+
+    def getGenealogyIndex(self) -> List[int]:
         """
-        Return the genealogy of the current node.
+        Return the genealogy index of the current node.
         """
         genealogy_index = list()
         current_node = self
@@ -140,11 +140,15 @@ class MMPNode:
             genealogy_index.append(current_node.getChildrenIndex())
             current_node = current_node.parent
         genealogy_index.reverse()
-        if len(genealogy_index) == 0 :
-            genealogy_str = 'ROOT'
-        else :
-            genealogy_str = 'Node from : Root'
-            for idx in genealogy_index[1:] :
+        return genealogy_index
+    
+    def getGenealogyStr(self) -> List['MMPNode']:
+        """
+        Return the genealogy of the current node.
+        """
+        genealogy_str = 'ROOT'
+        if not self.isRoot() :
+            for idx in self.getGenealogyIndex() :   
                 genealogy_str += f' -> {idx}'
         return genealogy_str
 
@@ -196,7 +200,7 @@ class MMPNode:
         max_corr_idx = child_masked_correlations.argmax()
         self.children.append(MMPNode(self.dictionary, self.residual, max_corr_idx, parent=self))
         if verbose :
-            print(f">>> NEW MMPNode : {self.getGenealogyStr()}")
+            print(f"    NEW MMPNode : {self.getGenealogyStr()}  +  Node({len(self.children)})")
         return self.children[-1]
         
     def buildBranches(self, nb_branches:int) -> List['MMPNode'] :
@@ -281,7 +285,7 @@ class MMPTree() :
             else :
                 current_node = current_node.getChildren()[node_order - 1]
                 if verbose :
-                    print(f"$$ Using MMPNode : {current_node.getGenealogyStr()} $$")
+                    print(f"   ~~ Using MMPNode ({current_node.getGenealogyStr()}) ~~")
         return current_node
 
     def runMMPDF(self, branches_number:int, verbose=False) :
@@ -292,17 +296,16 @@ class MMPTree() :
         assert branches_number <= self.connections ** self.sparsity, "branches_number must be less than the number of possible paths"
         # Initialize the tree structure
         self.init_structure()
-        first_path = self.getCandidatePath(1)
-        self.leaves_paths.append(first_path)
         # Add branches in a serial manner
         branch_counter = 1
-        while len(self.leaves_paths) <= branches_number :
+        while len(self.leaves_paths) < branches_number :
             # Depth-first search for the next path
-            if verbose :
-                print(f">> Branch n°{branch_counter} exploring path : {self.leaves_paths[-1]}")
             next_path = self.getCandidatePath(len(self.leaves_paths) + 1)
             self.leaves_paths.append(next_path)
-            self.leaves_nodes.append(self.MMPDFBranchFromPath(next_path, verbose=verbose))
+            if verbose :
+                print(f"\nBRANCH n°{branch_counter} exploring path : {self.leaves_paths[-1]}")
+            # Build the branch from the path
+            self.leaves_nodes.append(self.MMPDFBranchFromPath(self.leaves_paths[-1], verbose=verbose))
             branch_counter += 1
 
     def printLeaves(self) :
