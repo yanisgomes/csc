@@ -339,3 +339,37 @@ class CSCWorkbench:
         axs[0].set_title('Signal n°{} decomposition : MSE = {:.2e}'.format(id, approx_dict['mse']))
         axs[0].legend(loc='best')
         plt.show()
+
+    def plotMMPTree(self, db_path:str, id:int) -> None :
+
+        """
+        Plot the MMP Tree leaves' approximations.
+        """
+        # Load the data
+        with open(db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+        # Get the true signal
+        signal_dict = self.signalDictFromId(id)
+        mmp_tree_dict = mmp_result_dict['mmp-tree']
+
+        # Plot the comparison
+        fig, axs = plt.subplots(len(mmp_tree_dict)+1, 1, figsize=(12, 2*(len(mmp_tree_dict)+1)), sharex=True)
+        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
+            
+        for i, (path_str, path_dict) in enumerate(mmp_tree_dict.items()) :
+            atoms_dict = path_dict['atoms']
+            mmp_approx = np.zeros_like(signal_dict['signal'])
+            for atom_dict in atoms_dict :
+                zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['sigma'])
+                zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
+                mmp_approx += atom_signal
+            axs[0].plot(mmp_approx, label='{} = {}'.format(path_str, path_dict['mse']))
+            axs[i+1].plot(mmp_approx, label='{} = {}'.format(path_str, path_dict['mse']))
+            axs[i+1].legend(loc='best')
+            axs[i+1].axis('off')
+
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+        plt.show()

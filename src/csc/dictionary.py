@@ -15,8 +15,8 @@ from scipy.signal import oaconvolve
 
 from joblib import Parallel, delayed
 
-from .mmp import  *
 from .atoms import ZSAtom
+from .mmp import MMPTree
 from .utils import *
 
 def time_decorator(func):

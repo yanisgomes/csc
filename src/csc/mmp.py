@@ -13,12 +13,11 @@ from collections import Counter
 
 from joblib import Parallel, delayed
 
-from .dictionary import ZSDictionary
 from .atoms import ZSAtom
 from .utils import *
 
 class MMPNode:
-    def __init__(self, dictionary:ZSDictionary, signal:np.ndarray, activation_idx:int=None, parent=None):
+    def __init__(self, dictionary, signal:np.ndarray, activation_idx:int=None, parent=None):
         """
         Initialize an MMP node.
 
@@ -68,7 +67,7 @@ class MMPNode:
             self.atom_idx = atom_idx
             self.atom = dictionary.getAtom(atom_idx)
             self.atom_signal = self.atom.getAtomInSignal(signal_length=self.signal_length, offset=self.atom_pos)
-            self.atom_info = {'x':self.atom_pos, 'b':self.atom.b, 'y':self.atom.y, 'sigma':self.atom.sigma}
+            self.atom_info = {'x':self.atom_pos, 'b':self.atom.b, 'y':self.atom.y, 's':self.atom.sigma}
         else :
             self.atom_pos = None
             self.atom_idx = None
@@ -227,20 +226,19 @@ class MMPNode:
         else :
             return self.parent.buildSignalRecovery() + self.atom_signal
         
-
-    def getFullBranchAtoms(self) -> Dict:
+    def getFullBranchAtoms(self) -> dict:
         """
         Edit the full-blown dictionary of the node by concatenating atom_info dictionaries
         from parent nodes recursively.
         """
         if not self.isRoot():
-            return self.parent.editFullBlownDict() + [self.atom_info]  
+            return self.parent.getFullBranchAtoms() + [self.atom_info]  
         else :
             return []
     
 class MMPTree() :
 
-    def __init__(self, dictionary:ZSDictionary, signal:np.ndarray, sparsity:int, connections:int) :
+    def __init__(self, dictionary, signal:np.ndarray, sparsity:int, connections:int) :
         self.dictionary = dictionary
         self.signal = signal
         self.sparsity = sparsity
