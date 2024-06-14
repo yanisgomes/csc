@@ -50,6 +50,7 @@ class MMPNode:
             # Apply the orthogonal projection
             self.activation_mask[activation_idx] = 1.0
 
+        # //////////////<<  BEGIN COMPUTATINAL HEART BEAT  >>\\\\\\\\\\\\\\\
         # Solve the LSQR system on the orthogonal projection
         # Least Squares with QR decomposition
         # A @ x = b with A = masked_conv_op, x = activations, b = signal
@@ -57,6 +58,8 @@ class MMPNode:
         activations, *_ = lsqr(masked_conv_op, signal)
         approx = masked_conv_op @ activations
         self.residual = self.signal - approx
+        self.correlations_with_residual = self.dictionary.computeCorrelations(self.residual)/np.linalg.norm(self.residual)
+        # \\\\\\\\\\\\\\\<<  END COMPUTATINAL HEART BEAT  >>///////////////
 
         # Unravel the activation index to get the atom and its position
         if activation_idx is not None :
@@ -66,6 +69,19 @@ class MMPNode:
             self.atom = dictionary.getAtom(atom_idx)
             self.atom_signal = self.atom.getAtomInSignal(signal_length=self.signal_length, offset=self.atom_pos)
             self.atom_info = {'x':self.atom_pos, 'b':self.atom.b, 'y':self.atom.y, 'sigma':self.atom.sigma}
+        else :
+            self.atom_pos = None
+            self.atom_idx = None
+            self.atom = None
+            self.atom_signal = None
+            self.atom_info = None
+
+        # Compute the atom correlations
+        if self.atom_signal is not None :
+            self.atom_correlations = self.dictionary.computeCorrelations(self.atom_signal)/np.linalg.norm(self.atom_signal)
+            self.atom_similarity_mask = self.getBinarySimilarityMask()
+        else :
+            self.atom_correlations = None
 
         # Initialize NetworkX ID
         self.nxid = uuid.uuid4()
@@ -113,6 +129,24 @@ class MMPNode:
         if self.isRoot() :
             return 0
         return self.parent.children.index(self)
+    
+    def getGenealogyStr(self) -> List['MMPNode']:
+        """
+        Return the genealogy of the current node.
+        """
+        genealogy_index = list()
+        current_node = self
+        while not current_node.isRoot() :
+            genealogy_index.append(current_node.getChildrenIndex())
+            current_node = current_node.parent
+        genealogy_index.reverse()
+        if len(genealogy_index) == 0 :
+            genealogy_str = 'ROOT'
+        else :
+            genealogy_str = 'Node from : Root'
+            for idx in genealogy_index[1:] :
+                genealogy_str += f' -> {idx}'
+        return genealogy_str
 
     def computeBinaryMaskCorrelation(self, atom_idx:int, atom_pos:int, similarity:float=0.8) -> np.ndarray:
         """
@@ -128,6 +162,12 @@ class MMPNode:
         correlations_with_atom = self.dictionary.computeCorrelations(atom_signal)/np.linalg.norm(atom_signal)
         return (correlations_with_atom <= similarity).astype(int)
     
+    def getBinarySimilarityMask(self, similarity:float=0.8) -> np.ndarray:
+        """
+        Compute the binary similarity mask for the current node wit hitself.
+        """
+        return (self.atom_correlations <= similarity).astype(int)
+    
     def getChildrenMaskedCorrelations(self, similarity:float=0.8) -> np.ndarray:
         signal_correlations = self.dictionary.computeCorrelations(self.residual)/np.linalg.norm(self.residual)
         masked_correlations = signal_correlations.copy()
@@ -135,6 +175,15 @@ class MMPNode:
             child_pos, child_idx = child_node.atom_pos, child_node.atom_idx
             child_binary_mask = self.computeBinaryMaskCorrelation(child_idx, child_pos, similarity)
             masked_correlations *= child_binary_mask
+        return masked_correlations
+    
+    def getChildrenMaskedCorrelations(self, similarity:float=0.8) -> np.ndarray:
+        """
+        Compute the masked correlations of the children nodes.
+        """
+        masked_correlations = self.correlations_with_residual.copy()
+        for child_node in self.children :
+            masked_correlations *= child_node.atom_similarity_mask
         return masked_correlations
 
     def addChildNode(self, verbose=False) -> 'MMPNode':
@@ -146,6 +195,8 @@ class MMPNode:
         child_masked_correlations = self.getChildrenMaskedCorrelations()
         max_corr_idx = child_masked_correlations.argmax()
         self.children.append(MMPNode(self.dictionary, self.residual, max_corr_idx, parent=self))
+        if verbose :
+            print(f">>> NEW MMPNode : {self.getGenealogyStr()}")
         return self.children[-1]
         
     def buildBranches(self, nb_branches:int) -> List['MMPNode'] :
@@ -216,7 +267,7 @@ class MMPTree() :
             candidate_number += (node_order - 1) * self.connections ** i
         return candidate_number
 
-    def buildBranchFromPath(self, path:List[int], verbose=False) :
+    def MMPDFBranchFromPath(self, path:List[int], verbose=False) :
         """
         Build a branch from a path of atom indices.
         Args:
@@ -229,6 +280,8 @@ class MMPTree() :
                 current_node = child_node
             else :
                 current_node = current_node.getChildren()[node_order - 1]
+                if verbose :
+                    print(f"$$ Using MMPNode : {current_node.getGenealogyStr()} $$")
         return current_node
 
     def runMMPDF(self, branches_number:int, verbose=False) :
@@ -249,7 +302,7 @@ class MMPTree() :
                 print(f">> Branch n°{branch_counter} exploring path : {self.leaves_paths[-1]}")
             next_path = self.getCandidatePath(len(self.leaves_paths) + 1)
             self.leaves_paths.append(next_path)
-            self.leaves_nodes.append(self.buildBranchFromPath(next_path, verbose=verbose))
+            self.leaves_nodes.append(self.MMPDFBranchFromPath(next_path, verbose=verbose))
             branch_counter += 1
 
     def printLeaves(self) :

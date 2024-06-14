@@ -32,7 +32,7 @@ def generate_tree(K, L):
 
 # Example usage
 K = 4  # Number of layers
-L = 2  # Number of branches per node
+L = 4  # Number of branches per node
 
 tree_graph = generate_tree(K, L)
 
