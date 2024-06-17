@@ -279,7 +279,7 @@ class CSCWorkbench:
             output_data = json.load(f)
             approxs_dict = [result for id in ids for result in output_data['omp'] if result['id'] == id]
         # Plot the comparison
-        fig, axs = plt.subplots(len(ids), 1, figsize=(12, 4*len(ids)), sharex=True)
+        fig, axs = plt.subplots(len(ids), 1, figsize=(12, 3*len(ids)), sharex=True)
         for i, approx_dict in enumerate(approxs_dict):
             # Plot the noisy signal
             signal_dict = self.signalDictFromId(approx_dict['id'])
@@ -294,6 +294,7 @@ class CSCWorkbench:
             axs[i].plot(approx_dict['approx'], label='OMP Reconstruction')
             axs[i].set_title(f"Decomposition of signal n°{approx_dict['id']}")
             axs[i].legend(loc='best')
+            axs[i].axis('off')
         plt.show()
 
     def plotStepDecomposition(self, db_path:str, id:int) -> None :
@@ -332,12 +333,14 @@ class CSCWorkbench:
             axs[i+1].plot(approx_atom_signal, label='Approx atom', alpha=0.9, lw=1)
             axs[i+1].set_title(f'Step n°{i+1}')
             axs[i+1].legend(loc='best')
+            axs[i+1].axis('off')
 
         axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
         axs[0].plot(trueSuperposition, label='True superposition', color='g', alpha=0.9, lw=2)
         axs[0].plot(approxSuperposition, label='Approx superposition')
         axs[0].set_title('Signal n°{} decomposition : MSE = {:.2e}'.format(id, approx_dict['mse']))
         axs[0].legend(loc='best')
+        axs[0].axis('off')
         plt.show()
 
     def plotMMPTree(self, db_path:str, id:int) -> None :
@@ -373,3 +376,43 @@ class CSCWorkbench:
         axs[0].legend(loc='best')
         axs[0].axis('off')
         plt.show()
+
+    def plotMMPComparison(self, mmp_db_path:str, id:int) -> None :
+        """
+        Use three subplots to compare the results between the OMP and the MMP results.
+        The OMP result corresponds to the first branch of the MMP tree.
+        The MMP result corresponds to the MSE-argmin of the MMP tree.
+        """
+        # Load the data
+        with open(mmp_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+        # Get the true signal
+        signal_dict = self.signalDictFromId(id)
+        mmp_tree_dict = mmp_result_dict['mmp-tree']
+        sparsity = mmp_result_dict['sparsity']
+
+        fig, axs = plt.subplots(1, 1, figsize=(1, 2*3), sharex=True)
+        
+        # Find the OMP and the MMP dict
+        min_mse = np.inf
+        mmp_dict = None
+        for path_str, leaf_dict in mmp_tree_dict.items() :
+            if all(c == '1' for c in path_str.split('-')) :
+                omp_dict = leaf_dict
+            if leaf_dict['mse'] <= min_mse :
+                mmp_dict = leaf_dict
+                min_mse = leaf_dict['mse']
+
+        # Extract the atoms from the dict
+        list_atoms = [omp_dict['atoms'], mmp_dict['atoms']]
+
+            
+
+
+
+        
+
+        
+
+
