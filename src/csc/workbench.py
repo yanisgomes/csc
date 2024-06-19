@@ -377,14 +377,14 @@ class CSCWorkbench:
         axs[0].axis('off')
         plt.show()
 
-    def plotMMPComparison(self, mmp_db_path:str, id:int) -> None :
+    def plotMMPComparison(self, db_path:str, id:int) -> None :
         """
         Use three subplots to compare the results between the OMP and the MMP results.
         The OMP result corresponds to the first branch of the MMP tree.
         The MMP result corresponds to the MSE-argmin of the MMP tree.
         """
         # Load the data
-        with open(mmp_db_path, 'r') as f:
+        with open(db_path, 'r') as f:
             output_data = json.load(f)
             mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
         # Get the true signal
@@ -392,27 +392,104 @@ class CSCWorkbench:
         mmp_tree_dict = mmp_result_dict['mmp-tree']
         sparsity = mmp_result_dict['sparsity']
 
-        fig, axs = plt.subplots(1, 1, figsize=(1, 2*3), sharex=True)
+        fig, axs = plt.subplots(3, 1, figsize=(12, 3*3), sharex=True)
+        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
         
         # Find the OMP and the MMP dict
         min_mse = np.inf
         mmp_dict = None
+        mmp_path = None
         for path_str, leaf_dict in mmp_tree_dict.items() :
             if all(c == '1' for c in path_str.split('-')) :
                 omp_dict = leaf_dict
             if leaf_dict['mse'] <= min_mse :
                 mmp_dict = leaf_dict
                 min_mse = leaf_dict['mse']
+                mmp_path = path_str
 
         # Extract the atoms from the dict
-        list_atoms = [omp_dict['atoms'], mmp_dict['atoms']]
+        results_dict = [omp_dict, mmp_dict]
+        results_name = ['OMP', f'MMP {mmp_path}']
+        # Plot the comparison
+        for i, result_dict in enumerate(results_dict) :
+            approx = np.zeros_like(signal_dict['signal'])
+            atoms_dict = result_dict['atoms']
+            for atom_dict in atoms_dict :
+                zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['s'])
+                zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
+                approx += atom_signal
+            axs[0].plot(approx, color=f'C{i}', label=results_name[i])
+            axs[i+1].plot(approx, color=f'C{i}')
+            axs[i+1].plot(signal_dict['signal'], color='k', alpha=0.4, lw=3)
+            axs[i+1].set_title('{} : MSE = {:.2e}'.format(results_name[i], result_dict["mse"]), fontsize=12)
+            axs[i+1].axis('off')  
 
-            
+        axs[0].legend(loc='best') 
+        axs[0].axis('off')
+        plt.show()
 
+    def plotMMPDecomposition(self, db_path:str, id:int) -> None :
+        """
+        Plot the signal decomposition.
+        Args:
+            signal_dict (Dict): Signal dictionary.
+        """
+        # Load the data
+        with open(db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+        # Get the true signal
+        signal_dict = self.signalDictFromId(id)
+        mmp_tree_dict = mmp_result_dict['mmp-tree']
+        sparsity = mmp_result_dict['sparsity']
 
+        # Find the OMP and the MMP dict
+        min_mse = np.inf
+        mmp_dict = None
+        mmp_path = None
+        for path_str, leaf_dict in mmp_tree_dict.items() :
+            if all(c == '1' for c in path_str.split('-')) :
+                omp_dict = leaf_dict
+            if leaf_dict['mse'] <= min_mse :
+                mmp_dict = leaf_dict
+                mmp_path = path_str
+                min_mse = leaf_dict['mse']
 
+        # Extract the atoms from the dict
+        omp_atoms_dict = omp_dict['atoms']
+        mmp_atoms_dict = mmp_dict['atoms']
+        nb_atoms = len(omp_atoms_dict)
+
+        fig, axs = plt.subplots(nb_atoms+1, 1, figsize=(12, (nb_atoms+1)*3), sharex=True)
+    
+        # Create the signals
+        omp_signal = np.zeros_like(signal_dict['signal'])
+        mmp_signal = np.zeros_like(signal_dict['signal'])
+
+        for i, (omp_atom, mmp_atom) in enumerate(zip(omp_atoms_dict, mmp_atoms_dict)) :
+            # Construct the atoms from parameters
+            omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
+            omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
+            mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            # Get the atom signals
+            omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
+            omp_signal += omp_atom_signal
+            mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
+            mmp_signal += mmp_atom_signal
+            # Plot the atoms and the noisy signal
+            axs[i+1].plot(signal_dict['signal'], label='Signal', color='k', alpha=0.3, lw=3)
+            axs[i+1].plot(omp_atom_signal, label='OMP atom')
+            axs[i+1].plot(mmp_atom_signal, label='MMP atom')
+            axs[i+1].set_title(f'Step n°{i+1}', fontsize=12)
+            axs[i+1].legend(loc='best')
+            axs[i+1].axis('off')
         
-
-        
-
-
+        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
+        axs[0].plot(omp_signal, label='OMP')
+        axs[0].plot(mmp_signal, label='MMP')
+        axs[0].set_title('OMP MSE = {:.2e} & MMP {} MSE = {:.2e}'.format(omp_dict['mse'], mmp_path, mmp_dict['mse']), fontsize=12)
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+        plt.show()
