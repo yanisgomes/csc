@@ -895,14 +895,14 @@ class CSCWorkbench:
             return wrapper
         return decorator
 
-    def position_f1(self, matched_atoms):
+    def computePositionF1(self, matched_atoms):
         position_errors = [abs(true_atom['x'] - predicted_atom['x']) for true_atom, predicted_atom in matched_atoms]
         tp = sum(1 for error in position_errors if error <= 5)
         fp = len(matched_atoms) - tp
         fn = len(matched_atoms) - tp
         return tp, fp, fn
     
-    def correlation_f1(self, matched_atoms):
+    def computeCorrelationF1(self, matched_atoms):
         corr_errors = []
         for true_atom, predicted_atom in matched_atoms:
             # Build the ture atom's signal
@@ -915,32 +915,52 @@ class CSCWorkbench:
             predicted_atom_signal = predicted_atom_obj.getAtomInSignal(self.signals_length, predicted_atom['x'])
             corr = np.correlate(true_atom_signal, predicted_atom_signal, mode='valid')[0]
             corr_errors.append(corr)
-
         tp = sum(1 for corr in corr_errors if abs(corr) >= self.f1CorrThreshold)
         fp = len(matched_atoms) - tp
         fn = len(matched_atoms) - tp
-
+        return tp, fp, fn
 
     @matching_strategy(positionMatching)  
-    @f1_strategy(position_f1)
-    def calculate_metrics(self, row, matched_atoms, tp, fp, fn):
+    @f1_strategy(computePositionF1)
+    def metrics_positionMatching_positionF1(self, row, matched_atoms, tp, fp, fn):
+        return pd.Series([tp, fp, fn])
+    
+    @matching_strategy(positionMatching)
+    @f1_strategy(computeCorrelationF1)
+    def metrics_positionMatching_correlationF1(self, row, matched_atoms, tp, fp, fn):
         return pd.Series([tp, fp, fn])
 
-    def apply_metrics(self, df):
-        results = df.apply(lambda row: self.calculate_metrics(row), axis=1)
-        df[['tp', 'fp', 'fn']] = results
+    def computeMMPDFScoreF1(self, db_path: str, matching_type: str = 'matchingPosition', f1_type: str = 'f1Position'):
+        """
+        Compute the F1 score by SNR for different algorithms and sparsity levels.
+        """
+        processed_results = self.processMMPDFResults(db_path)
+        df = pd.DataFrame(processed_results['results'])
+
+        metrics_dict = {
+            'matchingPosition': {
+                'f1Position': self.metrics_positionMatching_positionF1,
+                'f1Correlation': self.metrics_positionMatching_correlationF1
+            }
+        }
+
+        calculate_metrics = metrics_dict[matching_type][f1_type]
+        df[['tp', 'fp', 'fn']] = df.apply(lambda row: calculate_metrics(row), axis=1)
+
+        # Calculate Precision, Recall, F1 Score
         df['precision'] = df['tp'] / (df['tp'] + df['fp'])
         df['recall'] = df['tp'] / (df['tp'] + df['fn'])
         df['F1'] = 2 * (df['precision'] * df['recall']) / (df['precision'] + df['recall'])
+
         return df
 
     def plotMMPDFScoreF1(self, db_path: str, matching_type: str = 'matchingPosition', f1_type: str = 'f1Position'):
         """
-        Plot the F1 score by SNR for different algorithms and sparsity levels.
+        Plot the F1 score by S(NR for different algorithms and sparsity levels.
         """
         plt.figure(figsize=(12, 8))
 
-        metrics_df = self.computeMMPDFScoreF1Position(db_path, matching_type, f1_type)
+        metrics_df = self.computeMMPDFScoreF1(db_path, matching_type, f1_type)
 
         # Define colors and markers for the plots
         colors = {'OMP': 'navy', 'MMP-DF': 'red'}
