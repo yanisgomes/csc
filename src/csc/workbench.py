@@ -103,7 +103,7 @@ class CSCWorkbench:
         return signals_dict
     
 
-    def positionMatching(self, true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[Tuple[Dict,Dict]]:
+    def computeMatchingPosition(self, true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[Tuple[Dict,Dict]]:
         """
         Compute the best position matching using the hungarian algorithm
         Args:
@@ -119,41 +119,7 @@ class CSCWorkbench:
         matched_atoms = [(true_atoms[i], approx_atoms[j]) for i, j in zip(row_ind, col_ind)]
         return matched_atoms
 
-
-    def mseArgminMatching(self, true_atoms_dict:List[Dict], approx_atoms_dict:List[Dict]) -> List[Tuple[Dict,Dict]]:
-        """
-        Compute the best mse matching using the hungarian algorithm
-        Args:
-            true_atoms (List[Dict]): Atoms of the true dictionary.
-            approx_atoms (List[Dict]): Atoms of the approximation dictionary.
-        Returns:
-            List[Tuple[Dict,Dict]]: List of tuples of matched atoms dict.
-        """
-        true_positions = np.array([atom['x'] for atom in true_atoms_dict])
-        approx_positions = np.array([atom['x'] for atom in approx_atoms_dict])
-
-        true_atoms = [ZSAtom.from_dict(atom) for atom in true_atoms_dict]
-        approx_atoms = [ZSAtom.from_dict(atom) for atom in approx_atoms_dict]
-        # Pad the atoms
-        for atom in true_atoms:
-            atom.padBothSides(self.dictionary.getAtomsLength())
-        for atom in approx_atoms:
-            atom.padBothSides(self.dictionary.getAtomsLength())
-        # Compute the signals
-        true_atom_signals = [atom.getAtomInSignal(self.signals_length, atom_dict['x']) for atom, atom_dict in zip(true_atoms, true_atoms_dict)]
-        approx_atom_signals = [atom.getAtomInSignal(self.signals_length, atom_dict['x']) for atom, atom_dict in zip(approx_atoms, approx_atoms_dict)]
-    
-        # Compute the cost matrix as the MSE between each pair of true and approx atom signals
-        cost_matrix = np.zeros((len(true_atoms), len(approx_atoms)))
-        for i, true_signal in enumerate(true_atom_signals):
-            for j, approx_signal in enumerate(approx_atom_signals):
-                cost_matrix[i, j] = np.mean((true_signal - approx_signal)**2)
-
-        row_ind, col_ind = optimize.linear_sum_assignment(cost_matrix)
-        matched_atoms = [(true_atoms_dict[i], approx_atoms_dict[j]) for i, j in zip(row_ind, col_ind)]
-        return matched_atoms
-    
-    def correlationMatching(self, true_atoms_dict:List[Dict], approx_atoms_dict:List[Dict]) -> List[Tuple[Dict,Dict]]:
+    def computeMatchingCorrelation(self, true_atoms_dict:List[Dict], approx_atoms_dict:List[Dict]) -> List[Tuple[Dict,Dict]]:
         """
         Compute the best correlation matching using the hungarian algorithm
         Args:
@@ -205,8 +171,7 @@ class CSCWorkbench:
             mse = np.mean((signal_dict['signal'] - recovered_signal)**2)
             self.mseErrorThreshold[snr] = mse*(1 + error_prct/100)
 
-    @staticmethod
-    def meanPositionError(true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[int]:
+    def meanPositionError(self, true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[int]:
         """
         Compute the position error between the true and approximation dictionaries.
         Args:
@@ -215,11 +180,10 @@ class CSCWorkbench:
         Returns:
             List[int]: List of position errors.
         """
-        positions_errors = [true_atom['x'] - approx_atom['x'] for true_atom, approx_atom in CSCWorkbench.positionMatching(true_atoms, approx_atoms)]
+        positions_errors = [true_atom['x'] - approx_atom['x'] for true_atom, approx_atom in self.computeMatchingPosition(true_atoms, approx_atoms)]
         return np.mean(positions_errors)
     
-    @staticmethod
-    def positionErrorPerStep(true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[int]:
+    def positionErrorPerStep(self, true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[int]:
         """
         Compute the position error between the true and approximation dictionaries.
         Args:
@@ -228,7 +192,7 @@ class CSCWorkbench:
         Returns:
             List[int]: List of position errors.
         """
-        positions_errors = [true_atom['x'] - approx_atom['x'] for true_atom, approx_atom in CSCWorkbench.positionMatching(true_atoms, approx_atoms)]
+        positions_errors = [true_atom['x'] - approx_atom['x'] for true_atom, approx_atom in self.computeMatchingPosition(true_atoms, approx_atoms)]
         return positions_errors
     
     def computeMeanPositionErrors(self, db_path:str) -> Dict:
@@ -632,7 +596,6 @@ class CSCWorkbench:
             'algo_step': [],
             'algo_type': []
         }
-
         # Iterate over the outputs
         for result in output_data['mmp'] :
 
@@ -652,7 +615,7 @@ class CSCWorkbench:
             signal_atoms = signal_dict['atoms']
 
             # Compute MMP errors
-            mmp_pos_error_per_step = CSCWorkbench.positionErrorPerStep(signal_atoms, mmp_approx_atoms)
+            mmp_pos_error_per_step = self.positionErrorPerStep(signal_atoms, mmp_approx_atoms)
             # Append MMP data
             for i, err in enumerate(mmp_pos_error_per_step):
                 data_errors['id'].append(signal_id)
@@ -664,7 +627,7 @@ class CSCWorkbench:
                 data_errors['algo_type'].append('MMP-DF')
 
             # Compute OMP errors
-            omp_pos_error_per_step = CSCWorkbench.positionErrorPerStep(signal_atoms, omp_approx_atoms)
+            omp_pos_error_per_step = self.positionErrorPerStep(signal_atoms, omp_approx_atoms)
             # Append OMP data
             for i, err in enumerate(omp_pos_error_per_step):
                 data_errors['id'].append(signal_id)
@@ -783,126 +746,33 @@ class CSCWorkbench:
 
         return {'results': results}
 
-    def computeMMPDFScoreF1Position(self, db_path, matching_type='matchingPosition', f1_type='f1Position'):
-        """
-        Compute the F1 score by SNR for different algorithms and sparsity levels.
-        """
-        processed_results = self.processMMPDFResults(db_path)
-        # Convert data to DataFrame
-        df = pd.DataFrame(processed_results['results'])
-
-        # Calculate TP, FP, FN by sparsity level and algorithm
-        def calculate_metrics(row, matching, f1):
-            true_atoms = row['true_atoms']
-            predicted_atoms = row['predicted_atoms']
-
-            # Matching
-            if matching == 'matchingPosition':
-                matched_atoms = self.positionMatching(true_atoms, predicted_atoms)
-            elif matching == 'matchingMSE':
-                matched_atoms = self.mseArgminMatching(true_atoms, predicted_atoms)
-            elif matching == 'matchingCorrelation':
-                matched_atoms = self.correlationMatching(true_atoms, predicted_atoms)
-            else :
-                raise ValueError('Invalid matching type')
-            
-            # F1 metrics
-            if f1 == 'f1Position':
-                position_errors = [abs(true_atom['x'] - predicted_atom['x']) for true_atom, predicted_atom in matched_atoms]
-                tp = sum(1 for error in position_errors if error <= 5)
-                fp = len(predicted_atoms) - tp
-                fn = len(true_atoms) - tp
-            elif f1 == 'f1Correlation':
-                corr_errors = []
-                for true_atom, predicted_atom in matched_atoms:
-                    # Build the ture atom's signal
-                    true_atom_obj = ZSAtom.from_dict(true_atom)
-                    true_atom_obj.padBothSides(self.dictionary.getAtomsLength())
-                    true_atom_signal = true_atom_obj.getAtomInSignal(self.signals_length, true_atom['x'])
-                    # Build the predicted atom's signal
-                    predicted_atom_obj = ZSAtom.from_dict(predicted_atom)
-                    predicted_atom_obj.padBothSides(self.dictionary.getAtomsLength())
-                    predicted_atom_signal = predicted_atom_obj.getAtomInSignal(self.signals_length, predicted_atom['x'])
-                    corr = np.correlate(true_atom_signal, predicted_atom_signal, mode='valid')[0]
-                    corr_errors.append(corr)
-
-                tp = sum(1 for corr in corr_errors if abs(corr) >= self.f1CorrThreshold)
-                fp = len(predicted_atoms) - tp
-                fn = len(true_atoms) - tp
-            else :
-                raise ValueError('Invalid F1 type')
-
-            return pd.Series([tp, fp, fn])
-        
-        def metricsMatchingPositionF1Position(row) :
-            return calculate_metrics(row, 'matchingPosition', 'f1Position')
-        
-        def metricsMatchingPositionf1Correlation(row) :
-            return calculate_metrics(row, 'matchingPosition', 'f1Correlation')
-        
-        def metricsMatchingMSEF1Position(row) :
-            return calculate_metrics(row, 'matchingMSE', 'f1Position')
-        
-        def metricsMatchingMSEf1Correlation(row) :
-            return calculate_metrics(row, 'matchingMSE', 'f1Correlation')
-        
-        def metricsMatchingCorrelationF1Position(row) :
-            return calculate_metrics(row, 'matchingCorrelation', 'f1Position')
-        
-        metrics_dict = {
-            'matchingPosition' : {
-                'f1Position' : metricsMatchingPositionF1Position,
-                'f1Correlation' : metricsMatchingPositionf1Correlation
-            },
-            'matchingMSE' : {
-                'f1Position' : metricsMatchingMSEF1Position,
-                'f1Correlation' : metricsMatchingMSEf1Correlation
-            }
-        }
-
-        metrics = df.apply(metrics_dict[matching_type][f1_type], axis=1)
-        df[['tp', 'fp', 'fn']] = metrics
-        
-        # Calculate Precision, Recall, F1 Score
-        df['precision'] = df['tp'] / (df['tp'] + df['fp'])
-        df['recall'] = df['tp'] / (df['tp'] + df['fn'])
-        df['F1'] = 2 * (df['precision'] * df['recall']) / (df['precision'] + df['recall'])
     
-        return df
-
-    # Decorator for matching strategies
-    @staticmethod
-    def matching_strategy(matching_func):
-        def decorator(func):
-            def wrapper(processor, *args, **kwargs):
-                row = args[0]
-                true_atoms = row['true_atoms']
-                predicted_atoms = row['predicted_atoms']
-                # Appel de matching_func qui est une méthode d'instance, passe self
-                matched_atoms = matching_func(processor, true_atoms, predicted_atoms)
-                return func(processor, row, matched_atoms, *args[1:], **kwargs)
-            return wrapper
-        return decorator
-
-    # Decorator for F1 strategies
-    @staticmethod
-    def f1_strategy(f1_func):
-        def decorator(func):
-            def wrapper(processor, *args, **kwargs):
-                row, matched_atoms = args[0], args[1]
-                tp, fp, fn = f1_func(matched_atoms)
-                return func(processor, row, tp, fp, fn, *args[2:], **kwargs)
-            return wrapper
-        return decorator
-
-    def computePositionF1(self, matched_atoms):
+    def computeScoreF1Position(self, matched_atoms):
+        """
+        Compute the F1 score based on the position errors.
+        Returns:
+            tp (int): True positives.
+            fp (int): False positives.
+            fn (int): False negatives.
+        Args:
+            matched_atoms (List): List of matched atoms.
+        """
         position_errors = [abs(true_atom['x'] - predicted_atom['x']) for true_atom, predicted_atom in matched_atoms]
         tp = sum(1 for error in position_errors if error <= 5)
         fp = len(matched_atoms) - tp
         fn = len(matched_atoms) - tp
         return tp, fp, fn
     
-    def computeCorrelationF1(self, matched_atoms):
+    def computeScoreF1Correlation(self, matched_atoms):
+        """
+        Compute the F1 score based on the correlation errors.
+        Returns:
+            tp (int): True positives.
+            fp (int): False positives.
+            fn (int): False negatives.
+        Args:
+            matched_atoms (List): List of matched atoms.
+        """
         corr_errors = []
         for true_atom, predicted_atom in matched_atoms:
             # Build the ture atom's signal
@@ -920,41 +790,56 @@ class CSCWorkbench:
         fn = len(matched_atoms) - tp
         return tp, fp, fn
 
-    @matching_strategy(positionMatching)  
-    @f1_strategy(computePositionF1)
-    def metrics_positionMatching_positionF1(self, row, matched_atoms, tp, fp, fn):
+    def calculateF1Metrics(self, row:pd.Series, matching:str, f1:str) -> pd.Series:
+        """
+        Calculate the F1 score.
+        """
+        true_atoms = row['true_atoms']
+        predicted_atoms = row['predicted_atoms']
+
+        # Atom matching
+        matching_method = getattr(self, f'computeMatching{matching.capitalize()}')
+        matched_atoms = matching_method(true_atoms, predicted_atoms)
+
+        # F1 metrics
+        metrics_method = getattr(self, f'computeScoreF1{f1.capitalize()}')
+        tp, fp, fn = metrics_method(matched_atoms)
+
         return pd.Series([tp, fp, fn])
     
-    @matching_strategy(positionMatching)
-    @f1_strategy(computeCorrelationF1)
-    def metrics_positionMatching_correlationF1(self, row, matched_atoms, tp, fp, fn):
-        return pd.Series([tp, fp, fn])
+    def metrics_positionMatching_positionF1(self, row) :
+        return self.calculateF1Metrics(row, matching='position', f1='position')
 
-    def computeMMPDFScoreF1(self, db_path: str, matching_type: str = 'matchingPosition', f1_type: str = 'f1Position'):
+    def metrics_positionMatching_correlationF1(self, row) :
+        return self.calculateF1Metrics(row, matching='position', f1='correlation')
+    
+    def metrics_correlationMatching_positionF1(self, row) :
+        return self.calculateF1Metrics(row, matching='correlation', f1='position')
+        
+    def metrics_correlationMatching_correlationF1(self, row) :
+        return self.calculateF1Metrics(row, matching='correlation', f1='correlation')
+
+    def computeMMPDFScoreF1(self, db_path, matching_type='position', f1_type='position'):
         """
         Compute the F1 score by SNR for different algorithms and sparsity levels.
         """
         processed_results = self.processMMPDFResults(db_path)
+        # Convert data to DataFrame
         df = pd.DataFrame(processed_results['results'])
 
-        metrics_dict = {
-            'matchingPosition': {
-                'f1Position': self.metrics_positionMatching_positionF1,
-                'f1Correlation': self.metrics_positionMatching_correlationF1
-            }
-        }
-
-        calculate_metrics = metrics_dict[matching_type][f1_type]
-        df[['tp', 'fp', 'fn']] = df.apply(lambda row: calculate_metrics(row), axis=1)
-
+        # Get the metrics function
+        metrics_func = getattr(self, f'metrics_{matching_type}Matching_{f1_type}F1')
+        metrics = df.apply(metrics_func, axis=1)
+        df[['tp', 'fp', 'fn']] = metrics
+        
         # Calculate Precision, Recall, F1 Score
         df['precision'] = df['tp'] / (df['tp'] + df['fp'])
         df['recall'] = df['tp'] / (df['tp'] + df['fn'])
         df['F1'] = 2 * (df['precision'] * df['recall']) / (df['precision'] + df['recall'])
-
+    
         return df
 
-    def plotMMPDFScoreF1(self, db_path: str, matching_type: str = 'matchingPosition', f1_type: str = 'f1Position'):
+    def plotMMPDFScoreF1(self, db_path: str, matching_type: str = 'position', f1_type: str = 'position'):
         """
         Plot the F1 score by S(NR for different algorithms and sparsity levels.
         """
@@ -964,7 +849,7 @@ class CSCWorkbench:
 
         # Define colors and markers for the plots
         colors = {'OMP': 'navy', 'MMP-DF': 'red'}
-        markers = {3: 'o', 4: 'D', 5: 'X'}  # Example for up to 5 sparsity levels
+        markers = {3: 'o', 4: 'D', 5: 'X'}  # Example for up to 5 sparsity level
 
         # Group data and plot
         grouped = metrics_df.groupby(['algo_type', 'sparsity'])
@@ -986,13 +871,13 @@ class CSCWorkbench:
         plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(0.1))
         plt.show()
 
-    def plotMMPDFScoreF1Gloabl(self, db_path: str, matching_type: str = 'matchingPosition', f1_type: str = 'f1Position'):
+    def plotMMPDFScoreF1Global(self, db_path: str, matching_type: str = 'position', f1_type: str = 'position'):
         """
         Plot the F1 score by SNR for different algorithms and sparsity levels.
         """
         plt.figure(figsize=(12, 8))
 
-        metrics_df = self.computeMMPDFScoreF1Position(db_path, matching_type, f1_type)
+        metrics_df = self.computeMMPDFScoreF1(db_path, matching_type, f1_type)
 
         # Define colors and markers for the plots
         colors = {'OMP': 'navy', 'MMP-DF': 'red'}
