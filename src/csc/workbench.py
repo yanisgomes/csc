@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import itertools
 import pandas as pd
 import seaborn as sns
 from tqdm import tqdm
@@ -12,6 +13,9 @@ from scipy import optimize
 from .dictionary import ZSDictionary
 from .atoms import ZSAtom
 from .utils import *
+
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
 
 class CSCWorkbench:
 
@@ -249,7 +253,7 @@ class CSCWorkbench:
             signal_atoms = signal_dict['atoms']
             approx_atoms = result['atoms']
             # Compute errors
-            pos_error_per_step = CSCWorkbench.positionErrorPerStep(signal_atoms, approx_atoms)
+            pos_error_per_step =self.positionErrorPerStep(signal_atoms, approx_atoms)
             # Append data
             for i, err in enumerate(pos_error_per_step):
                 data_errors['id'].append(signal_id)
@@ -745,7 +749,6 @@ class CSCWorkbench:
             results.append(result_mmp)
 
         return {'results': results}
-
     
     def computeScoreF1Position(self, matched_atoms):
         """
@@ -904,5 +907,399 @@ class CSCWorkbench:
         plt.gca().xaxis.set_major_locator(ticker.MultipleLocator(5))
         plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(0.1))
         plt.show()
+    
+ #       ______     __   __   ______     ______     __         ______     ______  
+ #      /\  __ \   /\ \ / /  /\  ___\   /\  == \   /\ \       /\  __ \   /\  == \ 
+ #      \ \ \/\ \  \ \ \'/   \ \  __\   \ \  __<   \ \ \____  \ \  __ \  \ \  _-/ 
+ #       \ \_____\  \ \__|    \ \_____\  \ \_\ \_\  \ \_____\  \ \_\ \_\  \ \_\   
+ #        \/_____/   \/_/      \/_____/   \/_/ /_/   \/_____/   \/_/\/_/   \/_/   
+ #                                                                                
+    def getSignalOverlapVectorFromId(self, id:int) -> np.ndarray:
+        """
+        Get the signal overlap vector from its ID.
+        It is a integer vector that counts the number of atoms that overlap at each position.
+        """
+        # Get the signal dictionary
+        signal_dict = self.signalDictFromId(id)
+        atoms_list = signal_dict['atoms']
+        atoms_signals = list()
+        # Compute the atoms signals
+        for atom in atoms_list:
+            zs_atom = ZSAtom.from_dict(atom)
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
+            atoms_signals.append(atom_signal)
+        # Build the binary support vector for each atom
+        bin_atoms_signals = [np.where(np.abs(atom_signal) > ZSAtom.SUPPORT_THRESHOLD, 1, 0) for atom_signal in atoms_signals]
+        overlap_vector = sum(bin_atoms_signals)
+        return overlap_vector
+    
+    def getSignalOverlapIntervalsFromId(self, id:int) -> List:
+        """
+        Get the signal overlap intervals from its ID.
+        It is a list of tuples that contains the start and end positions of the overlap intervals.
+        Returns:
+            overlap_intervals (List): List of tuples (start, end)
+            overlap_intervals_values (List): List of overlap values for each interval.
+        """
+        overlap_vector = self.getSignalOverlapVectorFromId(id)
+        overlap_intervals = list()
+        overlap_intervals_values = list()
+        start = 0
+        current_overlap = overlap_vector[0]
+        for idx, overlap in enumerate(overlap_vector):
+            if current_overlap != overlap:
+                overlap_intervals.append((start, idx))
+                overlap_intervals_values.append(current_overlap)
+                current_overlap = overlap
+                start = idx
+        overlap_intervals.append((start, len(overlap_vector)))
+        overlap_intervals_values.append(current_overlap)   
+        return overlap_intervals, overlap_intervals_values
 
+    def getSignalOverlapMetricsFromId(self, id:int) -> Dict:
+        """
+        Get the signal overlap metrics from its ID.
+        It is a dictionary that counts the number of positions that are overlapped by a given number of atoms.
+        Key = number of atoms that overlap a position : Value = number of positions.
+        Args:
+            id (int): Signal ID.
+        Returns:
+            dict: Signal dictionary.
+        """
+        signal_dict = self.signalDictFromId(id)
+        atoms_list = signal_dict['atoms']
+        overlap_vector = self.getSignalOverlapVectorFromId(id)
+        overlap_metrics = dict()
+        for overlap in range(len(atoms_list)+1) :
+            overlap_metrics[overlap] = sum(overlap_vector >= overlap)
+        return overlap_metrics
+
+    def signalOverlapPrctFromId(self, id:int, nb_round:int=2) -> Dict:
+        """
+        Get the signal overlap percentage from its ID.
+        """
+        overlap_metrics = self.getSignalOverlapMetricsFromId(id)
+        total_steps = sum(overlap_metrics.values())
+        overlap_prct = {overlap: round(100*count/total_steps, nb_round) for overlap, count in overlap_metrics.items()}
+        return overlap_prct
+
+    def plotSignalOverlapFromId(self, id:int) -> None :
+        """
+        Plot the signal with a conditional coloring according to the overlap vector.
+        """
+        # Get the signal dictionary
+        signal_dict = self.signalDictFromId(id)
+        atoms_list = signal_dict['atoms']
+        overlap_vector = self.getSignalOverlapVectorFromId(id)
+
+        # Plot the signal
+        fig, axs = plt.subplots(2, 1, figsize=(12, 2*2), sharex=True)
+        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
+        true_signal = np.zeros_like(signal_dict['signal'])
+
+        # Color the background based on overlap
+        cmap = plt.get_cmap('plasma')
+        max_overlap = max(overlap_vector)
+        norm = Normalize(vmin=0, vmax=max_overlap)
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+
+        for idx, val in enumerate(overlap_vector):
+            axs[0].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+            axs[1].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+
+        # Compute the atoms signals
+        offset = 1.5*max(np.abs(signal_dict['signal']))
+        for i, atom in enumerate(atoms_list):
+            zs_atom = ZSAtom.from_dict(atom)
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
+            true_signal += atom_signal
+            # Plot the atom's signal
+            axs[1].plot(atom_signal + i*offset, label=f'Atom at {atom["x"]}', alpha=0.6, lw=2)
+
+        axs[0].plot(true_signal, label='True signal', color='g', lw=2)   
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+        #axs[1].legend(loc='best')
+        axs[1].axis('off')
+
+        # Add a colorbar
+        fig.colorbar(sm, ax=axs, orientation='vertical', label='Overlap level', pad=0.01)
+        plt.show()
+
+    def plotSignalOverlapErrorFromId(self, mmpdf_db_path:str, id:int) -> None :
+        """
+        Plot the signal with a conditional coloring according to the overlap vector.
+        """
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+        
+        # Get the true signal
+        signal_dict = self.signalDictFromId(id)
+        mmp_tree_dict = mmp_result_dict['mmp-tree']
+
+        # Find the OMP and the MMP dict
+        min_mse = np.inf
+        mmp_dict = None
+        mmp_path = None
+        for path_str, leaf_dict in mmp_tree_dict.items() :
+            if all(c == '1' for c in path_str.split('-')) :
+                omp_dict = leaf_dict
+            if leaf_dict['mse'] <= min_mse :
+                mmp_dict = leaf_dict
+                mmp_path = path_str
+                min_mse = leaf_dict['mse']
+
+        # Extract the atoms from the dict
+        omp_atoms_dict = omp_dict['atoms']
+        mmp_atoms_dict = mmp_dict['atoms']
+
+        # Create the signals
+        omp_signal = np.zeros_like(signal_dict['signal'])
+        mmp_signal = np.zeros_like(signal_dict['signal'])
+
+        for i, (omp_atom, mmp_atom) in enumerate(zip(omp_atoms_dict, mmp_atoms_dict)) :
+            # Construct the atoms from parameters
+            omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
+            omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
+            mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            # Get the atom signals
+            omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
+            omp_signal += omp_atom_signal
+            mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
+            mmp_signal += mmp_atom_signal
+
+        # Get the overlap vector of the signal
+        overlap_vector = self.getSignalOverlapVectorFromId(id)
+
+        # Build the figure
+        fig, axs = plt.subplots(2, 1, figsize=(15, 3*2), sharex=True)
+        
+        # Color the background based on overlap
+        cmap = plt.get_cmap('plasma')
+        max_overlap = max(overlap_vector)
+        norm = Normalize(vmin=0, vmax=max_overlap)
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+
+        for idx, val in enumerate(overlap_vector):
+            axs[0].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+            axs[1].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+
+        # Plot the signals
+        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
+        axs[0].plot(omp_signal, label='OMP', color='b', lw=2)
+        axs[0].plot(mmp_signal, label=f'MMP {mmp_path}', color='r', lw=2)
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+
+        # Compute the reconstruction error
+        omp_quadratic_error = (signal_dict['signal'] - omp_signal)**2
+        mmp_quadratic_error = (signal_dict['signal'] - mmp_signal)**2
+
+        # Plot the reconstruction error
+        axs[1].plot(omp_quadratic_error, label='OMP error', color='b', lw=1, alpha=0.9)
+        axs[1].plot(mmp_quadratic_error, label=f'MMP {mmp_path} error', color='r', lw=1, alpha=0.9)
+        axs[1].legend(title='Quadratic error', loc='best')
+        axs[1].axis('off')
+
+        # Add a colorbar
+        fig.colorbar(sm, ax=axs, orientation='vertical', label='Overlap level', pad=0.01)
+        plt.show()
+
+    def plotSignalOverlapIntervalMSEFromId(self, mmpdf_db_path:str, id:int) -> None :
+        """
+        Plot the signal with a conditional coloring according to the overlap vector.
+        """
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+        
+        # Get the true signal
+        signal_dict = self.signalDictFromId(id)
+        mmp_tree_dict = mmp_result_dict['mmp-tree']
+
+        # Find the OMP and the MMP dict
+        min_mse = np.inf
+        mmp_dict = None
+        mmp_path = None
+        for path_str, leaf_dict in mmp_tree_dict.items() :
+            if all(c == '1' for c in path_str.split('-')) :
+                omp_dict = leaf_dict
+            if leaf_dict['mse'] <= min_mse :
+                mmp_dict = leaf_dict
+                mmp_path = path_str
+                min_mse = leaf_dict['mse']
+
+        # Extract the atoms from the dict
+        omp_atoms_dict = omp_dict['atoms']
+        mmp_atoms_dict = mmp_dict['atoms']
+
+        # Create the signals
+        omp_signal = np.zeros_like(signal_dict['signal'])
+        mmp_signal = np.zeros_like(signal_dict['signal'])
+
+        for i, (omp_atom, mmp_atom) in enumerate(zip(omp_atoms_dict, mmp_atoms_dict)) :
+            # Construct the atoms from parameters
+            omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
+            omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
+            mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            # Get the atom signals
+            omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
+            omp_signal += omp_atom_signal
+            mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
+            mmp_signal += mmp_atom_signal
+
+        # Build the figure
+        fig, axs = plt.subplots(2, 1, figsize=(15, 3*2), sharex=True)
+        
+        # Get the overlap vector of the signal
+        overlap_vector = self.getSignalOverlapVectorFromId(id)
+        overlap_intervals, overlap_intervals_values = self.getSignalOverlapIntervalsFromId(id)
+
+        # Color the background based on overlap
+        cmap = plt.get_cmap('plasma')
+        max_overlap = max(overlap_vector)
+        norm = Normalize(vmin=0, vmax=max_overlap)
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+
+        for idx, val in enumerate(overlap_vector):
+            axs[0].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+            axs[1].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+
+        # Plot the signals
+        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
+        axs[0].plot(omp_signal, label='OMP', color='b', lw=2)
+        axs[0].plot(mmp_signal, label=f'MMP {mmp_path}', color='r', lw=2)
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+
+        
+        omp_mse_signal = np.zeros_like(signal_dict['signal'])
+        mmp_mse_signal = np.zeros_like(signal_dict['signal'])
+        for (start, end), val in zip(overlap_intervals, overlap_intervals_values):
+            # Compute the mse on the interval
+            omp_mse_on_interval = np.mean((signal_dict['signal'][start:end] - omp_signal[start:end])**2)
+            mmp_mse_on_interval = np.mean((signal_dict['signal'][start:end] - mmp_signal[start:end])**2)
+            # Fill the mse signals
+            omp_mse_signal[start:end] = omp_mse_on_interval*np.ones(end-start)
+            mmp_mse_signal[start:end] = mmp_mse_on_interval*np.ones(end-start)
+
+        # Plot the constant by interval MSE
+        axs[1].plot(omp_mse_signal, label='OMP error', color='b', lw=1, alpha=0.9)
+        axs[1].plot(mmp_mse_signal, label=f'MMP {mmp_path} error', color='r', lw=1, alpha=0.9)
+        axs[1].legend(title='MSE per interval', loc='best')
+        axs[1].axis('off')
+
+        # Add a colorbar
+        fig.colorbar(sm, ax=axs, orientation='vertical', label='Overlap level', pad=0.01)
+        plt.show()
+
+    def computeMMPDFMSEPerOverlapInterval(self, db_path:str) -> Dict:
+        """
+        Compute the position errors for all the signals.
+        """
+        # Load the data
+        with open(db_path, 'r') as f:
+            output_data = json.load(f)
+
+        data_overlap_intervals = {
+            'id': [],
+            'snr': [],
+            'overlap': [],
+            'local_mse': [],
+            'algo_type': []
+        }
+        # Iterate over the outputs
+        for result in output_data['mmp'] :
+
+            # Get the MMP approximation
+            signal_id = result['id']
+            mmp_tree_dict = result['mmp-tree']
+            mmp_approx_dict, mmp_approx_mse = self.getArgminMSEFromMMPTree(mmp_tree_dict)
+            mmp_approx_atoms = mmp_approx_dict['atoms']
+
+            # Get the OMP approximation
+            omp_path_str = '-'.join(['1']*result['sparsity'])
+            omp_approx_mse = mmp_tree_dict[omp_path_str]['mse']
+            omp_approx_atoms = mmp_tree_dict[omp_path_str]['atoms']
+
+            # Get the signal from the approx id
+            signal_dict = self.signalDictFromId(signal_id)
+            signal_atoms = signal_dict['atoms']
+
+            # Get the overlap vector of the signal
+            overlap_vector = self.getSignalOverlapVectorFromId(signal_id)
+            overlap_intervals, overlap_intervals_values = self.getSignalOverlapIntervalsFromId(signal_id)
+
+            # Compute the reconstruction signals
+            # Create the signals
+            omp_signal = np.zeros_like(signal_dict['signal'])
+            mmp_signal = np.zeros_like(signal_dict['signal'])
+
+            for i, (omp_atom, mmp_atom) in enumerate(zip(omp_approx_atoms, mmp_approx_atoms)) :
+                # Construct the atoms from parameters
+                omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
+                omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
+                mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                # Get the atom signals
+                omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
+                omp_signal += omp_atom_signal
+                mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
+                mmp_signal += mmp_atom_signal
+
+            # Compute the local reconstruction error for each overlap interval
+            for (start, end), overlap in zip(overlap_intervals, overlap_intervals_values):
+                # Compute the mse on the interval
+                omp_mse_on_interval = np.mean((signal_dict['signal'][start:end] - omp_signal[start:end])**2)
+                mmp_mse_on_interval = np.mean((signal_dict['signal'][start:end] - mmp_signal[start:end])**2)
+
+                # Append the OMP data 
+                data_overlap_intervals['id'].append(signal_id)
+                data_overlap_intervals['snr'].append(signal_dict['snr'])
+                data_overlap_intervals['overlap'].append(overlap)
+                data_overlap_intervals['local_mse'].append(omp_mse_on_interval)
+                data_overlap_intervals['algo_type'].append('OMP')
+
+                # Append the MMP data
+                data_overlap_intervals['id'].append(signal_id)
+                data_overlap_intervals['snr'].append(signal_dict['snr'])
+                data_overlap_intervals['overlap'].append(overlap)
+                data_overlap_intervals['local_mse'].append(mmp_mse_on_interval)
+                data_overlap_intervals['algo_type'].append('MMP-DF')
+            
+        return data_overlap_intervals
+
+    def plotMMPDFLocalMSEOverlapBoxplot(self, mmpdf_db_path:str) :
+        """
+        Plot the boxplot of the position errors
+        Args:
+            mmpdf_db_path (str): Path to the MMPDF database.
+        """
+        plt.figure(figsize=(12, 8)) 
+        data_overlap_intervals = self.computeMMPDFMSEPerOverlapInterval(mmpdf_db_path)
+        df = pd.DataFrame(data_overlap_intervals)
+        sns.boxplot(x='overlap', y='local_mse', hue='algo_type', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
+        sns.despine(trim=True)
+        plt.title('OMP vs MMPDF local MSE Comparison by local overlap level', fontsize=14)
+        plt.xlabel('Signal to Noise Ratio (SNR) in dB', fontsize=12)
+        plt.ylabel('Position Error', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.legend(title='Algorithm', loc='best')
+        plt.show()
+
+    
+
+    
+        
 
