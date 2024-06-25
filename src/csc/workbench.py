@@ -1279,7 +1279,7 @@ class CSCWorkbench:
             
         return data_overlap_intervals
 
-    def plotMMPDFLocalMSEOverlapBoxplot(self, mmpdf_db_path:str) :
+    def plotMMPDFLocalMSEOverlapBoxplot(self, mmpdf_db_path:str, snr:int=-5) :
         """
         Plot the boxplot of the position errors
         Args:
@@ -1287,12 +1287,13 @@ class CSCWorkbench:
         """
         plt.figure(figsize=(12, 8)) 
         data_overlap_intervals = self.computeMMPDFMSEPerOverlapInterval(mmpdf_db_path)
-        df = pd.DataFrame(data_overlap_intervals)
+        df_all_snr = pd.DataFrame(data_overlap_intervals)
+        df = df_all_snr.loc[df_all_snr['snr'] == snr]
         sns.boxplot(x='overlap', y='local_mse', hue='algo_type', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
         sns.despine(trim=True)
         plt.title('OMP vs MMPDF local MSE Comparison by local overlap level', fontsize=14)
         plt.xlabel('Signal to Noise Ratio (SNR) in dB', fontsize=12)
-        plt.ylabel('Position Error', fontsize=12)
+        plt.ylabel('Local MSE', fontsize=12)
         plt.xticks(fontsize=10)
         plt.yticks(fontsize=10)
         plt.legend(title='Algorithm', loc='best')
