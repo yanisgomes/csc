@@ -983,6 +983,20 @@ class CSCWorkbench:
         total_steps = sum(overlap_metrics.values())
         overlap_prct = {overlap: round(100*count/total_steps, nb_round) for overlap, count in overlap_metrics.items()}
         return overlap_prct
+    
+    def signalOverlapTypePrctFromId(self, id:int, nb_round:int=2) -> Dict:
+        """
+        Get the signal overlap type percentage from its ID.
+        """
+        overlap_metrics = self.getSignalOverlapMetricsFromId(id)
+        total_steps = sum(overlap_metrics.values())
+        prct_overlap_type = dict()
+        for overlap_level in range(1, len(overlap_metrics)) :
+            counter = sum([count for overlap, count in overlap_metrics.items() if overlap >= overlap_level])
+            prct = round(100*counter/total_steps, nb_round)
+            key = f'>={overlap_level}'
+            prct_overlap_type[key] = prct
+        return prct_overlap_type
 
     def plotSignalOverlapFromId(self, id:int) -> None :
         """
@@ -1203,9 +1217,10 @@ class CSCWorkbench:
         fig.colorbar(sm, ax=axs, orientation='vertical', label='Overlap level', pad=0.01)
         plt.show()
 
-    def computeMMPDFMSEPerOverlapInterval(self, db_path:str) -> Dict:
+    def computeMMPDFLocalMSEPerOverlapInterval(self, db_path:str) -> Dict:
         """
-        Compute the position errors for all the signals.
+        Compute the MSE per overlap interval.
+        Each row corresponds to an overlap interval.
         """
         # Load the data
         with open(db_path, 'r') as f:
@@ -1221,8 +1236,18 @@ class CSCWorkbench:
         # Iterate over the outputs
         for result in output_data['mmp'] :
 
-            # Get the MMP approximation
+            # Reconstruct the denoised signal
             signal_id = result['id']
+            signal_dict = self.signalDictFromId(signal_id)
+            signal_atoms = signal_dict['atoms']
+            true_signal = np.zeros_like(signal_dict['signal'])
+            for atom in signal_atoms:
+                zs_atom = ZSAtom.from_dict(atom)
+                zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
+                true_signal += atom_signal            
+
+            # Get the MMP approximation
             mmp_tree_dict = result['mmp-tree']
             mmp_approx_dict, mmp_approx_mse = self.getArgminMSEFromMMPTree(mmp_tree_dict)
             mmp_approx_atoms = mmp_approx_dict['atoms']
@@ -1231,10 +1256,6 @@ class CSCWorkbench:
             omp_path_str = '-'.join(['1']*result['sparsity'])
             omp_approx_mse = mmp_tree_dict[omp_path_str]['mse']
             omp_approx_atoms = mmp_tree_dict[omp_path_str]['atoms']
-
-            # Get the signal from the approx id
-            signal_dict = self.signalDictFromId(signal_id)
-            signal_atoms = signal_dict['atoms']
 
             # Get the overlap vector of the signal
             overlap_vector = self.getSignalOverlapVectorFromId(signal_id)
@@ -1260,8 +1281,8 @@ class CSCWorkbench:
             # Compute the local reconstruction error for each overlap interval
             for (start, end), overlap in zip(overlap_intervals, overlap_intervals_values):
                 # Compute the mse on the interval
-                omp_mse_on_interval = np.mean((signal_dict['signal'][start:end] - omp_signal[start:end])**2)
-                mmp_mse_on_interval = np.mean((signal_dict['signal'][start:end] - mmp_signal[start:end])**2)
+                omp_mse_on_interval = np.mean((true_signal[start:end] - omp_signal[start:end])**2)
+                mmp_mse_on_interval = np.mean((true_signal[start:end] - mmp_signal[start:end])**2)
 
                 # Append the OMP data 
                 data_overlap_intervals['id'].append(signal_id)
@@ -1286,21 +1307,158 @@ class CSCWorkbench:
             mmpdf_db_path (str): Path to the MMPDF database.
         """
         plt.figure(figsize=(12, 8)) 
-        data_overlap_intervals = self.computeMMPDFMSEPerOverlapInterval(mmpdf_db_path)
+        data_overlap_intervals = self.computeMMPDFLocalMSEPerOverlapInterval(mmpdf_db_path)
         df_all_snr = pd.DataFrame(data_overlap_intervals)
         df = df_all_snr.loc[df_all_snr['snr'] == snr]
         sns.boxplot(x='overlap', y='local_mse', hue='algo_type', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
         sns.despine(trim=True)
         plt.title('OMP vs MMPDF local MSE Comparison by local overlap level', fontsize=14)
-        plt.xlabel('Signal to Noise Ratio (SNR) in dB', fontsize=12)
+        plt.xlabel('Overlap >=', fontsize=12)
         plt.ylabel('Local MSE', fontsize=12)
         plt.xticks(fontsize=10)
         plt.yticks(fontsize=10)
         plt.legend(title='Algorithm', loc='best')
         plt.show()
 
-    
+    def computeMMPDFLocalMSEPOverlapPrct(self, db_path:str) -> Dict:
+        """
+        Compute the MSE and the overlap percentage for each signal.
+        Each row corresponds to a signal.
+        """
+        # Load the data
+        with open(db_path, 'r') as f:
+            output_data = json.load(f)
 
-    
-        
+        data_prct_overlap_type = {
+            'id': [],
+            'snr': [],
+            'overlap_type': [],
+            'prct_in_signal': [],
+            'algo_type': [],
+            'mse': []
+        }
+        # Iterate over the outputs
+        for result in output_data['mmp'] :
 
+            # Reconstruct the denoised signal
+            signal_id = result['id']
+            signal_dict = self.signalDictFromId(signal_id)
+            signal_atoms = signal_dict['atoms']
+            true_signal = np.zeros_like(signal_dict['signal'])
+            for atom in signal_atoms:
+                zs_atom = ZSAtom.from_dict(atom)
+                zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
+                true_signal += atom_signal    
+
+            # Get the MMP approximation
+            mmp_tree_dict = result['mmp-tree']
+            mmp_approx_dict, mmp_approx_mse = self.getArgminMSEFromMMPTree(mmp_tree_dict)
+            mmp_approx_atoms = mmp_approx_dict['atoms']
+
+            # Get the OMP approximation
+            omp_path_str = '-'.join(['1']*result['sparsity'])
+            omp_approx_mse = mmp_tree_dict[omp_path_str]['mse']
+            omp_approx_atoms = mmp_tree_dict[omp_path_str]['atoms']
+
+            # Compute the reconstruction signals
+            # Create the signals
+            omp_signal = np.zeros_like(signal_dict['signal'])
+            mmp_signal = np.zeros_like(signal_dict['signal'])
+
+            for i, (omp_atom, mmp_atom) in enumerate(zip(omp_approx_atoms, mmp_approx_atoms)) :
+                # Construct the atoms from parameters
+                omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
+                omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
+                mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                # Get the atom signals
+                omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
+                omp_signal += omp_atom_signal
+                mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
+                mmp_signal += mmp_atom_signal
+
+            # Compute the reconstruction error
+            omp_mse = np.mean((true_signal - omp_signal)**2)
+            mmp_mse = np.mean((true_signal - mmp_signal)**2)
+
+            # Get the prct of overlap type in the signal
+            prct_overlap_type = self.signalOverlapTypePrctFromId(id=signal_id, nb_round=3)
+
+            # Compute the local reconstruction error for each overlap interval
+            for overlap_type, prct in prct_overlap_type.items():
+
+                # Append the OMP data 
+                data_prct_overlap_type['id'].append(signal_id)
+                data_prct_overlap_type['snr'].append(signal_dict['snr'])
+                data_prct_overlap_type['overlap_type'].append(overlap_type)
+                data_prct_overlap_type['prct_in_signal'].append(prct)
+                data_prct_overlap_type['algo_type'].append('OMP')
+                data_prct_overlap_type['mse'].append(omp_mse)
+
+                # Append the MMP data
+                data_prct_overlap_type['id'].append(signal_id)
+                data_prct_overlap_type['snr'].append(signal_dict['snr'])
+                data_prct_overlap_type['overlap_type'].append(overlap_type)
+                data_prct_overlap_type['prct_in_signal'].append(prct)
+                data_prct_overlap_type['algo_type'].append('MMP-DF')
+                data_prct_overlap_type['mse'].append(omp_mse)
+            
+        return data_prct_overlap_type
+
+    def plotMMPDFLocalMSEOverlapPrctLineplot(self, mmpdf_db_path:str) :
+        """
+        Plot the lineplot of the MSE by overlap percentage 
+        """
+        plt.figure(figsize=(12, 8))
+
+        overlap_prct_metrics = self.computeMMPDFLocalMSEPOverlapPrct(mmpdf_db_path)
+        metrics_df = pd.DataFrame(overlap_prct_metrics)
+
+        # Define colors and markers for the plots
+        colors = {'OMP': 'navy', 'MMP-DF': 'red'}
+        markers = {'>=1': 'o', '>=2': 'D', '>=3': 'X', '>=4': 's', '>=5': 'P'}
+
+        # Group data and plot
+        grouped = metrics_df.groupby(['algo_type', 'overlap_type'])
+        for (algo_type, overlap_type), group in grouped:
+            sns.lineplot(x='prct_in_signal', y='mse', data=group,
+                        label=f'{algo_type} overlap {overlap_type}',
+                        color=colors[algo_type],
+                        marker=markers[overlap_type],
+                        markersize=8)
+
+        plt.title(f'OMP and MMP-DF MSE per number of minimum overlapped atom on the same interval', fontsize=16)
+        plt.xlabel('Minimum number of overlapped atoms on the same interval', fontsize=14)
+        plt.ylabel('MSE', fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.legend(title='Algorithm & Sparsity', loc='upper left', fontsize=12)
+        plt.grid(True)
+        plt.gca().xaxis.set_major_locator(ticker.MultipleLocator(5))
+        plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(0.1))
+        plt.show()
+
+    def plotMMPDFLocalMSEOverlapPrctLineplot2(self, mmpdf_db_path):
+        """
+        Plot the lineplot of the MSE by overlap percentage for OMP and MMP-DF algorithms.
+        """
+        # Suppose the following function returns the DataFrame as expected
+        overlap_prct_metrics = self.computeMMPDFLocalMSEPOverlapPrct(mmpdf_db_path)
+        metrics_df = pd.DataFrame(overlap_prct_metrics)
+
+        plt.figure(figsize=(12, 8))
+        markers = {'>=1': 'o', '>=2': 'D', '>=3': 'X', '>=4': 's', '>=5': 'P'}
+
+        # Utilizing sns.scatterplot to plot data points with clear distinctions
+        sns.scatterplot(data=metrics_df, x='prct_in_signal', y='mse', hue='algo_type',
+                        style='overlap_type', markers=markers, palette=['navy', 'red'], s=100)
+
+        plt.title('OMP and MMP-DF MSE per Overlap Type Percentage in the Signal', fontsize=16)
+        plt.xlabel('Percentage of Overlap Type in Signal (%)', fontsize=14)
+        plt.ylabel('MSE', fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.legend(title='Algorithm & Overlap Type', loc='upper left', fontsize=12)
+        plt.grid(True)
+        plt.show()
