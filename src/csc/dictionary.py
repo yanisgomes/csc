@@ -275,23 +275,6 @@ class ZSDictionary() :
         stacked_signals = np.stack([signal] * len(self.atoms), axis=1)  
         all_correlations = oaconvolve(stacked_signals, atom_signals.T, mode='valid', axes=0)
         return all_correlations
-
-    def computeConvolutionsOnSubDict(self, activations, removed_atoms=List[ZSAtom]) :
-        """
-        This funcion is the matvec function of the MaskedConvOperator
-        that computes the convolution of the activations with the dictionary
-        It reconstructs the signal from the activations and the dictionary
-        Args:
-            activations (np.ndarray): The activations of the signal
-            removed_atoms (List[ZSAtom]): The list of atoms to remove from the dictionary
-        Returns:
-            np.ndarray: The reconstructed signal from the activations and the dictionary
-        """
-        similarAtoms = [similar for atom in removed_atoms for similar in self.atomsSimilarTo(atom)]
-        atoms_signals = np.array([atom() for atom in self.atoms if atom not in removed_atoms])
-        activations = np.reshape(activations, (-1, len(self.atoms)))
-        convolutions = oaconvolve(activations, atoms_signals.T, mode='full', axes=0).sum(axis=1)
-        return convolutions
     
     def getMaskedConvOperator(self, activation_mask) :
         """Return a LinearOperator that masks and does the convolution."""
@@ -430,7 +413,7 @@ class ZSDictionary() :
             infos.append({'original':atoms_info, 'recovered':recov_atoms_infos, 'mse': mse})
 
         return signals, reconstructions, infos
-    
+
     def ompPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, verbose=False) :
         """Create a pipeline of the OMP algorithm from the database of signals.
         Args:

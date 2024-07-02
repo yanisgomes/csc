@@ -185,6 +185,7 @@ class MMPNode:
         Compute the masked correlations of the children nodes.
         """
         masked_correlations = self.correlations_with_residual.copy()
+        
         for child_node in self.children :
             masked_correlations *= child_node.atom_similarity_mask
         return masked_correlations
@@ -259,27 +260,67 @@ class MMPTree() :
         self.leaves_nodes = []
         self.leaves_paths = []
 
-    def getCandidatePath(self, candidate_number:int) -> Tuple[int] :
+    @staticmethod
+    def getCandidatePath(sparsity, connections, candidate_number:int) -> Tuple[int] :
         """
-        Get the next path to explore in the MMP algorithm.
+        Get the path to explore in for a given candidate number
         """
         temp = candidate_number - 1
         path = []
-        for k in range(self.sparsity) :
-            path.append(temp % self.connections + 1)
-            temp = temp // self.connections
+        for k in range(sparsity) :
+            path.append(temp % connections + 1)
+            temp = temp // connections
         return tuple(path)
 
-    def getCandidateNumber(self, path:List[int]) -> int :   
+    @staticmethod
+    def getCandidateNumber(sparsity, connections, path:List[int]) -> int :   
         """
         Get the candidate number from a path of atom indices.
         """
-        assert len(path) == self.sparsity, "The path must have the same length as the sparsity"
+        assert len(path) == sparsity, "The path must have the same length as the sparsity"
         candidate_number = 1
         for i, node_order in enumerate(path) :
-            candidate_number += (node_order - 1) * self.connections ** i
+            candidate_number += (node_order - 1) * connections ** i
         return candidate_number
+    
+    @staticmethod
+    def getComputedNodesFromPath(path:List[int]) -> int :
+        revert_path = path[::-1][:-1]
+        computed_nodes = 1
+        for element in revert_path :
+            if element == 1 :
+                computed_nodes += 1
+            else :
+                break
+        return computed_nodes
 
+    @staticmethod
+    def getComputedNodesFromTree(sparsity:int, connections:int) -> np.ndarray :
+        max_branches_number = connections**sparsity
+        candidate_number = 1
+        computed_nodes = list()
+        while candidate_number <= max_branches_number :
+            current_path = MMPTree.getCandidatePath(sparsity, connections, candidate_number)
+            computed_nodes.append(MMPTree.getComputedNodesFromPath(current_path))
+            candidate_number += 1
+        return computed_nodes
+    
+    @staticmethod
+    def plotComputationFromTree(sparsity: int, connections: int):
+        computations = MMPTree.getComputedNodesFromTree(sparsity, connections)
+        
+        plt.figure(figsize=(10, 6))
+        plt.plot(computations, marker='', linestyle='-', linewidth=2, color='royalblue')
+        plt.title(f'Number of Computed Nodes Per Branch Number for K={sparsity} and L={connections}', fontsize=16)
+        plt.xlabel('Branch Number', fontsize=14)
+        plt.ylabel('Computed Nodes', fontsize=14)
+        plt.grid(True, which='both', linestyle='--', linewidth=0.5)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.ylim(0, max(computations)+1)
+        plt.tight_layout()
+        plt.show()
+        
     def MMPDFBranchFromPath(self, path:List[int], verbose=False) :
         """
         Build a branch from a path of atom indices.
@@ -309,10 +350,10 @@ class MMPTree() :
         branch_counter = 1
         while len(self.leaves_paths) < branches_number :
             # Depth-first search for the next path
-            next_path = self.getCandidatePath(len(self.leaves_paths) + 1)
+            next_path = MMPTree.getCandidatePath(self.sparsity, self.connections, len(self.leaves_paths) + 1)
             self.leaves_paths.append(next_path)
             if verbose :
-                print(f"\nBRANCH n°{branch_counter} exploring path : {self.leaves_paths[-1]}")
+                print("\nBRANCH n°{} exploring path : {} | computed nodes = {}".format(branch_counter, self.leaves_paths[-1], MMPTree.getComputedNodesFromPath(self.leaves_paths[-1])))
             # Build the branch from the path
             self.leaves_nodes.append(self.MMPDFBranchFromPath(self.leaves_paths[-1], verbose=verbose))
             branch_counter += 1

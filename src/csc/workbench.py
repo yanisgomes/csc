@@ -1135,11 +1135,18 @@ class CSCWorkbench:
             output_data = json.load(f)
             mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
         
-        # Get the true signal
+        # Reconstruct the denoised signal
         signal_dict = self.signalDictFromId(id)
-        mmp_tree_dict = mmp_result_dict['mmp-tree']
+        signal_atoms = signal_dict['atoms']
+        true_signal = np.zeros_like(signal_dict['signal'])
+        for atom in signal_atoms:
+            zs_atom = ZSAtom.from_dict(atom)
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
+            true_signal += atom_signal     
 
         # Find the OMP and the MMP dict
+        mmp_tree_dict = mmp_result_dict['mmp-tree']
         min_mse = np.inf
         mmp_dict = None
         mmp_path = None
@@ -1196,13 +1203,12 @@ class CSCWorkbench:
         axs[0].legend(loc='best')
         axs[0].axis('off')
 
-        
-        omp_mse_signal = np.zeros_like(signal_dict['signal'])
-        mmp_mse_signal = np.zeros_like(signal_dict['signal'])
+        omp_mse_signal = np.zeros_like(true_signal)
+        mmp_mse_signal = np.zeros_like(true_signal)
         for (start, end), val in zip(overlap_intervals, overlap_intervals_values):
             # Compute the mse on the interval
-            omp_mse_on_interval = np.mean((signal_dict['signal'][start:end] - omp_signal[start:end])**2)
-            mmp_mse_on_interval = np.mean((signal_dict['signal'][start:end] - mmp_signal[start:end])**2)
+            omp_mse_on_interval = np.mean((true_signal[start:end] - omp_signal[start:end])**2)
+            mmp_mse_on_interval = np.mean((true_signal[start:end] - mmp_signal[start:end])**2)
             # Fill the mse signals
             omp_mse_signal[start:end] = omp_mse_on_interval*np.ones(end-start)
             mmp_mse_signal[start:end] = mmp_mse_on_interval*np.ones(end-start)
