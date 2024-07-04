@@ -185,15 +185,14 @@ class ZSDictionary() :
             b, y, s = self.atoms[idx].params['b'], self.atoms[idx].params['y'], self.atoms[idx].params['sigma']
             atoms_infos.append({'x': offset, 'b': b, 'y': y, 's': s})
             noisesVarToSNR.append(self.atoms[idx].getNoiseVarToSNR(snr_level))
-        # Add noise to the signal with a given policy
-        # * noiseVar = max(noisesVarToSNR)
-        # * noiseVar = min(noisesVarToSNR)
-        # * noiseVar = avg(noisesVarToSNR)
-        noiseVar = max(noisesVarToSNR)
-        noise = np.random.normal(0, np.sqrt(noiseVar), signal_length)
-        signal += noise
+        
         signal /= np.linalg.norm(signal)
-        return signal, atoms_infos
+        signal_power = np.var(signal)   
+        noise_var = signal_power / (10 ** (snr_level / 10))
+        noise = np.random.normal(0, np.sqrt(noise_var), signal_length)
+        noisy_signal = signal + noise
+        noisy_signal /= np.linalg.norm(noisy_signal)
+        return noisy_signal, atoms_infos
     
     def generateSignalsDB(self, batch_size:int, signal_length:int, sparsity_levels:List[int], snr_levels:List[float], output_filename:str) -> None:
         """Generate a database of signals with different SNR levels and store it in a JSON file

@@ -133,9 +133,13 @@ class ZSAtom() :
         self.x_pad_right = self.x[-1] + self.step * np.arange(1, padding_right + 1)
         self.x = np.concatenate([self.x_pad_left, self.x, self.x_pad_right])
         self.position = self.x - self.x[0]
-
+    
+    @staticmethod
+    def noiseVarForSNR(var, snr) -> float :
+        return var / (10 ** (snr / 10))
+    
     def getNoiseVarToSNR(self, snr) -> float:
-        return self.var / (10 ** (snr / 10))
+        return ZSAtom.noiseVarForSNR(self.var, snr)
 
     def getSignal(self, *args, **kwargs) -> np.ndarray:
         """Returns the ZS atom signal
