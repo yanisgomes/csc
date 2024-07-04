@@ -1468,3 +1468,121 @@ class CSCWorkbench:
         plt.legend(title='Algorithm & Overlap Type', loc='upper left', fontsize=12)
         plt.grid(True)
         plt.show()
+
+    def plotMMPRankDistribution(self, db_path:str):
+        """
+        Plot the rank distribution of the MMP that has a better MSE score than OMP.
+        The plot is sorted by sparsity level.
+        """
+        # Load the data
+        with open(db_path, 'r') as f:
+            data = json.load(f)
+
+        # Filter the data to keep only the MMP results with better MSE than OMP
+        mmp_results = [mmp_path for result in data['mmp'] for mmp_path, mmp_dict in result['mmp-tree'].items() if mmp_dict['mse'] < mmp_dict['-'.join([1 for _ in range(result['sparsity'])])]['mse']]
+        
+        
+        # Sort the results by sparsity level
+        sorted_results = sorted(mmp_results, key=lambda x: x['sparsity'])
+
+        # Extract the ranks of the MMPs
+        ranks = [result['rank'] for result in sorted_results]
+
+        # Plot the rank distribution
+        plt.figure(figsize=(12, 8))
+        sns.histplot(ranks, bins=len(ranks), kde=True, color='blue')
+        plt.title('Rank Distribution of MMPs with Better MSE than OMP', fontsize=16)
+        plt.xlabel('Rank', fontsize=14)
+        plt.ylabel('Count', fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.grid(True)
+        plt.show()
+
+    def computeMMPRankDistribution(self, db_path:str) -> Dict:
+        """
+        Compute the MSE and the overlap percentage for each signal.
+        Each row corresponds to a signal.
+        """
+        # Load the data
+        with open(db_path, 'r') as f:
+            output_data = json.load(f)
+
+        data_prct_overlap_type = {
+            'id': [],
+            'snr': [],
+            'overlap_type': [],
+            'prct_in_signal': [],
+            'algo_type': [],
+            'mse': []
+        }
+        # Iterate over the outputs
+        for result in output_data['mmp'] :
+
+            # Reconstruct the denoised signal
+            signal_id = result['id']
+            signal_dict = self.signalDictFromId(signal_id)
+            signal_atoms = signal_dict['atoms']
+            true_signal = np.zeros_like(signal_dict['signal'])
+            for atom in signal_atoms:
+                zs_atom = ZSAtom.from_dict(atom)
+                zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
+                true_signal += atom_signal    
+
+            # Get the MMP approximation
+            mmp_tree_dict = result['mmp-tree']
+            mmp_approx_dict, mmp_approx_mse = self.getArgminMSEFromMMPTree(mmp_tree_dict)
+            mmp_approx_atoms = mmp_approx_dict['atoms']
+
+            # Get the OMP approximation
+            omp_path_str = '-'.join(['1']*result['sparsity'])
+            omp_approx_mse = mmp_tree_dict[omp_path_str]['mse']
+            omp_approx_atoms = mmp_tree_dict[omp_path_str]['atoms']
+
+            # Compute the reconstruction signals
+            # Create the signals
+            omp_signal = np.zeros_like(signal_dict['signal'])
+            mmp_signal = np.zeros_like(signal_dict['signal'])
+
+            for i, (omp_atom, mmp_atom) in enumerate(zip(omp_approx_atoms, mmp_approx_atoms)) :
+                # Construct the atoms from parameters
+                omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
+                omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
+                mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                # Get the atom signals
+                omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
+                omp_signal += omp_atom_signal
+                mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
+                mmp_signal += mmp_atom_signal
+
+            # Compute the reconstruction error
+            omp_mse = np.mean((true_signal - omp_signal)**2)
+            mmp_mse = np.mean((true_signal - mmp_signal)**2)
+
+            # Get the prct of overlap type in the signal
+            prct_overlap_type = self.signalOverlapTypePrctFromId(id=signal_id, nb_round=3)
+
+            # Compute the local reconstruction error for each overlap interval
+            for overlap_type, prct in prct_overlap_type.items():
+
+                # Append the OMP data 
+                data_prct_overlap_type['id'].append(signal_id)
+                data_prct_overlap_type['snr'].append(signal_dict['snr'])
+                data_prct_overlap_type['overlap_type'].append(overlap_type)
+                data_prct_overlap_type['prct_in_signal'].append(prct)
+                data_prct_overlap_type['algo_type'].append('OMP')
+                data_prct_overlap_type['mse'].append(omp_mse)
+
+                # Append the MMP data
+                data_prct_overlap_type['id'].append(signal_id)
+                data_prct_overlap_type['snr'].append(signal_dict['snr'])
+                data_prct_overlap_type['overlap_type'].append(overlap_type)
+                data_prct_overlap_type['prct_in_signal'].append(prct)
+                data_prct_overlap_type['algo_type'].append('MMP-DF')
+                data_prct_overlap_type['mse'].append(omp_mse)
+            
+        return data_prct_overlap_type
+    
+
