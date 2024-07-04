@@ -497,7 +497,7 @@ class ZSDictionary() :
         }
         return omp_result
     
-    def mmpdfPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, verbose=False) :
+    def mmpdfPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, connections:int=3, branches:int=10, verbose=False) :
         """Create a pipeline of the OMP algorithm from the database of signals.
         Args:
             input_filename (str): The name of the input file containing the signals database
@@ -524,7 +524,7 @@ class ZSDictionary() :
         results['source'] = input_filename
         results['date'] = get_today_date_str()
         results['algorithm'] = 'Convolutional MMP-DF'
-        results['nbBranches'] = nb_branches
+        results['nbBranches'] = branches
         results['connections'] = connections
         results['batchSize'] = data['batchSize']
         results['snrLevels'] = data['snrLevels']
@@ -533,7 +533,7 @@ class ZSDictionary() :
         results['dictionary'] = str(self)
 
         # Parallelize the OMP algorithm on the signals from the DB
-        mmpdf_results = Parallel(n_jobs=nb_cores)(delayed(self.mmpdfFromDict)(signal_dict, connections_level=connections, nb_branches=nb_branches, verbose=verbose) for signal_dict in tqdm(signals, desc='MMP-DF Pipeline from DB'))
+        mmpdf_results = Parallel(n_jobs=nb_cores)(delayed(self.mmpdfFromDict)(signal_dict, connections_level=connections, nb_branches=branches, verbose=verbose) for signal_dict in tqdm(signals, desc='MMP-DF Pipeline from DB'))
         results['mmp'] = mmpdf_results
         # Save the results in a JSON file
         json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)

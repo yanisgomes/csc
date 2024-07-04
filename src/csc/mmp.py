@@ -1,3 +1,4 @@
+import time
 import uuid
 from tqdm import tqdm
 from numba import njit, jit
@@ -49,7 +50,10 @@ class MMPNode:
             # Apply the orthogonal projection
             self.activation_mask[activation_idx] = 1.0
 
-        # //////////////<<  BEGIN COMPUTATINAL HEART BEAT  >>\\\\\\\\\\\\\\\
+        # Initialize the birth time to measure the computation time
+        self.birth_time = time.time()
+
+        # //////////////<<  BEGIN COMPUTATIONAL HEART BEAT  >>\\\\\\\\\\\\\\\
         # Solve the LSQR system on the orthogonal projection
         # Least Squares with QR decomposition
         # A @ x = b with A = masked_conv_op, x = activations, b = signal
@@ -58,7 +62,7 @@ class MMPNode:
         approx = masked_conv_op @ activations
         self.residual = self.signal - approx
         self.correlations_with_residual = self.dictionary.computeCorrelations(self.residual)/np.linalg.norm(self.residual)
-        # \\\\\\\\\\\\\\\<<  END COMPUTATINAL HEART BEAT  >>///////////////
+        # \\\\\\\\\\\\\\\<<  END COMPUTATINAL HEART BEAT  >>/////////////////
 
         # Unravel the activation index to get the atom and its position
         if activation_idx is not None :
@@ -85,6 +89,8 @@ class MMPNode:
         # Initialize NetworkX ID
         self.nxid = uuid.uuid4()
 
+        self.mmpdf_compute_time = self.getDelay()
+
     def isRoot(self) -> bool:
         return self.parent is None
     
@@ -104,6 +110,15 @@ class MMPNode:
         if self.isRoot() :
             return None
         return self.atom
+    
+    def getDelay(self) -> float:
+        if self.isRoot():
+            return time.time() - self.birth_time
+        else:
+            return self.parent.getDelay()
+        
+    def getMMPDFComputeTime(self) -> float:
+        return self.mmpdf_compute_time
     
     def getAtomSignal(self) -> np.ndarray:
         if self.isRoot() :
@@ -474,6 +489,5 @@ class MMPTree() :
             mmp_tree_dict[str_path] = dict()
             mmp_tree_dict[str_path]['mse'] = leaf.getMSE()
             mmp_tree_dict[str_path]['atoms'] = leaf.getFullBranchAtoms()
+            mmp_tree_dict[str_path]['delay'] = leaf.getMMPDFComputeTime()
         return mmp_tree_dict
-    
-    
