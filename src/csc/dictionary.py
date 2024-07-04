@@ -15,6 +15,11 @@ from scipy.signal import oaconvolve
 
 from joblib import Parallel, delayed
 
+import sporco.dictlrn.cbpdndl as cbpdndl
+import sporco.cnvrep as cr
+import sporco.linalg as spl
+import sporco.util as spu
+
 from .atoms import ZSAtom
 from .mmp import MMPTree
 from .utils import *
@@ -490,12 +495,12 @@ class ZSDictionary() :
         mmp_tree = MMPTree(dictionary=self, signal=signal, sparsity=sparsity_level, connections=connections_level)
         mmp_tree.runMMPDF(branches_number=nb_branches, verbose=verbose)
         mmp_tree_dict = mmp_tree.buildMMPTreeDict()
-        omp_result = {
+        mmp_result = {
             'id' : signal_dict['id'],
             'sparsity' : sparsity_level,
             'mmp-tree' : mmp_tree_dict
         }
-        return omp_result
+        return mmp_result
     
     def mmpdfPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, connections:int=3, branches:int=10, verbose=False) :
         """Create a pipeline of the OMP algorithm from the database of signals.
@@ -539,3 +544,57 @@ class ZSDictionary() :
         json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
         if verbose :
             print(f"MMP-DF Pipeline results saved in {output_filename}")
+
+
+#________/\\\\\\\\\__/\\\\\\\\\\\\\____/\\\\\\\\\\\\\____/\\\\\\\\\\\\_____/\\\\\_____/\\\_        
+# _____/\\\////////__\/\\\/////////\\\_\/\\\/////////\\\_\/\\\////////\\\__\/\\\\\\___\/\\\_       
+#  ___/\\\/___________\/\\\_______\/\\\_\/\\\_______\/\\\_\/\\\______\//\\\_\/\\\/\\\__\/\\\_      
+#   __/\\\_____________\/\\\\\\\\\\\\\\__\/\\\\\\\\\\\\\/__\/\\\_______\/\\\_\/\\\//\\\_\/\\\_     
+#    _\/\\\_____________\/\\\/////////\\\_\/\\\/////////____\/\\\_______\/\\\_\/\\\\//\\\\/\\\_    
+#     _\//\\\____________\/\\\_______\/\\\_\/\\\_____________\/\\\_______\/\\\_\/\\\_\//\\\/\\\_   
+#      __\///\\\__________\/\\\_______\/\\\_\/\\\_____________\/\\\_______/\\\__\/\\\__\//\\\\\\_  
+#       ____\////\\\\\\\\\_\/\\\\\\\\\\\\\/__\/\\\_____________\/\\\\\\\\\\\\/___\/\\\___\//\\\\\_ 
+#        _______\/////////__\/////////////____\///______________\////////////_____\///_____\/////__
+
+    def cbpdnFromDict(self, signal_dict:dict, lmbda:float, verbose:bool=False) -> dict:
+        """Recover the sparse signal from a dictionary of the signal using CBPDN algorithm"""
+        # Extract the signal and the dictionary
+        signal = signal_dict['signal']
+        sparsity_level = len(signal_dict['atoms'])
+        D = self.atoms
+
+        # Ensure the dictionary is in the correct format for SPORCO
+        D = np.array(D)
+
+        # Solve the CSC problem using CBPDN
+        opt = cbpdndl.ConvBPDN.Options({'Verbose': verbose, 'MaxMainIter': 100, 'RelStopTol': 1e-3, 'AuxVarObj': False})
+        b = cbpdndl.ConvBPDN(D, signal, lmbda, opt)
+        X = b.solve()
+
+        # Package the results
+        cbpdn_result = {
+            'id': signal_dict['id'],
+            'sparsity': sparsity_level,
+            'coefficients': X
+        }
+        return cbpdn_result
+
+    def testCBPDNPipeline(self, db_filename, verbose:bool=False) :
+
+        with open(db_filename, 'r') as json_file:
+            data = json.load(json_file)
+            if data is None:
+                raise ValueError("The input file is empty or does not contain any data.")
+        
+        if verbose :
+            print(f"MMP-DF Pipeline from {db_filename} with {len(data['signals'])} signals")
+
+        # CBPDN parameters
+        lmbda = 0.1
+
+        # Extract the signals from the DB
+        signals = data['signals']
+
+        signal_dict = signals[0]
+
+        return self.cbpdnFromDict(signal_dict, lmbda, verbose=True)
