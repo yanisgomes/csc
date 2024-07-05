@@ -191,12 +191,12 @@ class ZSDictionary() :
             atoms_infos.append({'x': offset, 'b': b, 'y': y, 's': s})
             noisesVarToSNR.append(self.atoms[idx].getNoiseVarToSNR(snr_level))
         
-        signal /= np.linalg.norm(signal)
-        signal_power = np.var(signal)   
+        non_zero_index = np.argwhere(np.abs(signal) > ZSAtom.SUPPORT_THRESHOLD)
+        non_zero_signal = signal[non_zero_index]
+        signal_power = np.var(non_zero_signal)   
         noise_var = signal_power / (10 ** (snr_level / 10))
         noise = np.random.normal(0, np.sqrt(noise_var), signal_length)
         noisy_signal = signal + noise
-        noisy_signal /= np.linalg.norm(noisy_signal)
         return noisy_signal, atoms_infos
     
     def generateSignalsDB(self, batch_size:int, signal_length:int, sparsity_levels:List[int], snr_levels:List[float], output_filename:str) -> None:
@@ -570,20 +570,18 @@ class ZSDictionary() :
         print(f'Dictionary shape : {D.shape}')
         print(f'Signal shape : {signal.shape}')
 
-        lmbda = 0.01
+        lmbda =1e-4
 
         opt = cbpdn.ConvBPDN.Options({
             'Verbose': True,
-            'MaxMainIter': 250,
-            'RelStopTol': 5e-3,
-            'HighMemSolve': True,
-            'AuxVarObj': False
+            'MaxMainIter': 200,
+            'RelStopTol': 1e-5,
+            'AutoRho': {'Enabled': True, 'Period': 1, 'StdResiduals': True},
+            'RelaxParam': 1.8,
+            'rho': 10,  # Commencez avec une valeur initiale raisonnable
+            'HighMemSolve': True
         })
                 
-        #opt = cbpdn.ConvBPDN.Options({'Verbose': verbose,
-        #                              'MaxMainIter': 100,
-        #                              'RelStopTol': 1e-3,
-        #                              'AuxVarObj': False})
         b = cbpdn.ConvBPDN(D, signal, lmbda, opt)
         X = b.solve()
         approx = b.reconstruct(X).squeeze()
@@ -614,7 +612,7 @@ class ZSDictionary() :
         # Extract the signals from the DB
         signals = data['signals']
 
-        signal_dict = signals[2138]
+        signal_dict = signals[2440]
         print(signal_dict)
 
         cbpdn_result = self.cbpdnFromDict(signal_dict, verbose=True)

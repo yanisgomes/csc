@@ -155,25 +155,6 @@ class CSCWorkbench:
         row_ind, col_ind = optimize.linear_sum_assignment(cost_matrix)
         matched_atoms = [(true_atoms_dict[i], approx_atoms_dict[j]) for i, j in zip(row_ind, col_ind)]
         return matched_atoms
-    
-    def mseErrorThresholdAutoCalibration(self, error_prct=10) -> None :
-        """
-        Auto-calibration of the MSE error threshold.
-        """
-        assert 0 <= error_prct <= 100, "Error percentage must be between 0 and 100."
-        self.mseErrorThreshold = {}
-        data = self.loadDataFromPath(self.signals_path)
-
-        for snr in self.snr_levels :
-            signal_dict = next((item for item in data['signals'] if item['snr'] == snr), None)
-            signal_atoms = signal_dict['atoms']
-            recovered_signal = np.zeros_like(signal_dict['signal'])
-            for atom in signal_atoms:
-                atom_obj = ZSAtom.from_dict(atom)
-                atom_obj.padBothSides(self.dictionary.getAtomsLength())
-                recovered_signal += atom_obj.getAtomInSignal(len(recovered_signal), atom['x'])
-            mse = np.mean((signal_dict['signal'] - recovered_signal)**2)
-            self.mseErrorThreshold[snr] = mse*(1 + error_prct/100)
 
     def meanPositionError(self, true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[int]:
         """
@@ -264,6 +245,42 @@ class CSCWorkbench:
                 data_errors['algo_step'].append(i+1)
         return data_errors
     
+    def computeOMPPositionErrorsPerStep(self, db_path:str) -> Dict:
+        """
+        Compute the position errors for all the signal on a MMPDF database
+        """
+        # Load the data
+        with open(db_path, 'r') as f:
+            output_data = json.load(f)
+
+        data_errors = {
+            'id': [],
+            'snr': [],
+            'sparsity': [],
+            'pos_err': [],
+            'abs_pos_err': [],
+            'algo_step': []
+        }
+        # Iterate over the outputs
+        for result in output_data['omp'] :
+            # Get signal and approximation atoms
+            signal_id = result['id']
+            signal_dict = self.signalDictFromId(signal_id)
+            signal_atoms = signal_dict['atoms']
+            approx_atoms = result['atoms']
+
+            # Compute errors
+            pos_error_per_step =self.positionErrorPerStep(signal_atoms, approx_atoms)
+            # Append data
+            for i, err in enumerate(pos_error_per_step):
+                data_errors['id'].append(signal_id)
+                data_errors['snr'].append(signal_dict['snr'])
+                data_errors['sparsity'].append(signal_dict['sparsity'])
+                data_errors['pos_err'].append(err)
+                data_errors['abs_pos_err'].append(np.abs(err))
+                data_errors['algo_step'].append(i+1)
+        return data_errors
+    
     def plotMeanPosErr(self, db_path:str) :
         """
         Plot the boxplot of the position errors.
@@ -331,80 +348,9 @@ class CSCWorkbench:
         df = df.sort_values(by='abs_pos_err', ascending=ascending)
         return df
     
-    def plotComparison(self, db_path:str, ids:List[int]) -> None :
-        """
-        Plot the signal decomposition.
-        Args:
-            signal_dict (Dict): Signal dictionary.
-        """
-        # Load the data
-        with open(db_path, 'r') as f:
-            output_data = json.load(f)
-            approxs_dict = [result for id in ids for result in output_data['omp'] if result['id'] == id]
-        # Plot the comparison
-        fig, axs = plt.subplots(len(ids), 1, figsize=(12, 3*len(ids)), sharex=True)
-        for i, approx_dict in enumerate(approxs_dict):
-            # Plot the noisy signal
-            signal_dict = self.signalDictFromId(approx_dict['id'])
-            axs[i].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
-            # Recover the true signal and plot it
-            true_signal = np.zeros_like(signal_dict['signal'])
-            for atom in signal_dict['atoms']:
-                zs_atom = ZSAtom.from_dict(atom)
-                zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                true_signal += zs_atom.getAtomInSignal(len(true_signal), atom['x'])
-            axs[i].plot(true_signal, label='True signal', color='g', alpha=0.9, lw=2)
-            axs[i].plot(approx_dict['approx'], label='OMP Reconstruction')
-            axs[i].set_title(f"Decomposition of signal n°{approx_dict['id']}")
-            axs[i].legend(loc='best')
-            axs[i].axis('off')
-        plt.show()
 
-    def plotStepDecomposition(self, db_path:str, id:int) -> None :
-        """
-        Plot the signal decomposition.
-        Args:
-            signal_dict (Dict): Signal dictionary.
-        """
-        # Load the data
-        with open(db_path, 'r') as f:
-            output_data = json.load(f)
-            approx_dict = next((result for result in output_data['omp'] if result['id'] == id), None)
-        # Get the true signal
-        signal_dict = self.signalDictFromId(id)
-        # Plot the comparison
-        fig, axs = plt.subplots(len(approx_dict['atoms'])+1, 1, figsize=(12, 4*len(approx_dict['atoms'])), sharex=True)
-    
-        trueSuperposition = np.zeros_like(signal_dict['signal'])
-        approxSuperposition = np.zeros_like(signal_dict['signal'])
-        
-        for i, (true_atom_dict, approx_atom_dict) in enumerate(zip(signal_dict['atoms'], approx_dict['atoms'])):
-            # Construct the atoms from parameters
-            true_atom = ZSAtom.from_dict(true_atom_dict)
-            true_atom.padBothSides(self.dictionary.getAtomsLength())
-            approx_atom = ZSAtom.from_dict(approx_atom_dict)
-            approx_atom.padBothSides(self.dictionary.getAtomsLength())
-            # Get the atom signals
-            true_atom_signal = true_atom.getAtomInSignal(len(signal_dict['signal']), true_atom_dict['x'])
-            approx_atom_signal = approx_atom.getAtomInSignal(len(signal_dict['signal']), approx_atom_dict['x'])
-            # Apply the atoms superposition
-            trueSuperposition += true_atom_signal
-            approxSuperposition += approx_atom_signal
-            # Plot the atoms and the noisy signal
-            axs[i+1].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.3, lw=3)
-            axs[i+1].plot(true_atom_signal, label='True atom', alpha=0.6, lw=2)
-            axs[i+1].plot(approx_atom_signal, label='Approx atom', alpha=0.9, lw=1)
-            axs[i+1].set_title(f'Step n°{i+1}')
-            axs[i+1].legend(loc='best')
-            axs[i+1].axis('off')
 
-        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
-        axs[0].plot(trueSuperposition, label='True superposition', color='g', alpha=0.9, lw=2)
-        axs[0].plot(approxSuperposition, label='Approx superposition')
-        axs[0].set_title('Signal n°{} decomposition : MSE = {:.2e}'.format(id, approx_dict['mse']))
-        axs[0].legend(loc='best')
-        axs[0].axis('off')
-        plt.show()
+
 
 
 #            .         .                     .         .                          
@@ -454,20 +400,26 @@ class CSCWorkbench:
         axs[0].axis('off')
         plt.show()
 
-    def plotMMPComparison(self, db_path:str, id:int) -> None :
+    def plotMMPComparison(self, mmpdf_db_path:str, id:int) -> None :
         """
         Use three subplots to compare the results between the OMP and the MMP results.
         The OMP result corresponds to the first branch of the MMP tree.
         The MMP result corresponds to the MSE-argmin of the MMP tree.
         """
         # Load the data
-        with open(db_path, 'r') as f:
+        with open(mmpdf_db_path, 'r') as f:
             output_data = json.load(f)
             mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+        
         # Get the true signal
         signal_dict = self.signalDictFromId(id)
-        mmp_tree_dict = mmp_result_dict['mmp-tree']
-        sparsity = mmp_result_dict['sparsity']
+        true_atoms = signal_dict['atoms']
+        true_signal = np.zeros_like(signal_dict['signal'])
+        for atom_dict in true_atoms :
+            zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['s'])
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
+            true_signal += atom_signal
 
         fig, axs = plt.subplots(3, 1, figsize=(12, 3*3), sharex=True)
         axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
@@ -476,6 +428,9 @@ class CSCWorkbench:
         min_mse = np.inf
         mmp_dict = None
         mmp_path = None
+        mmp_tree_dict = mmp_result_dict['mmp-tree']
+
+
         for path_str, leaf_dict in mmp_tree_dict.items() :
             if all(c == '1' for c in path_str.split('-')) :
                 omp_dict = leaf_dict
@@ -497,6 +452,7 @@ class CSCWorkbench:
                 atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
                 approx += atom_signal
             axs[0].plot(approx, color=f'C{i}', label=results_name[i])
+            axs[i+1].plot(true_signal, color='g')
             axs[i+1].plot(approx, color=f'C{i}')
             axs[i+1].plot(signal_dict['signal'], color='k', alpha=0.4, lw=3)
             axs[i+1].set_title('{} : MSE = {:.2e}'.format(results_name[i], result_dict["mse"]), fontsize=12)
@@ -642,8 +598,70 @@ class CSCWorkbench:
                 data_errors['algo_step'].append(i+1)
                 data_errors['algo_type'].append('OMP')
         return data_errors
+    
+    def sortByOMPPositionErrorAtStep(self, mmpdf_db_path:str, step:int, ascending:bool=True) :
+        """
+        Sort the position errors by the OMP position error at a given step.
+        """
+        data_errors = self.computeMMPPositionErrorsPerStep(mmpdf_db_path)
+        df_all_type = pd.DataFrame(data_errors)
+        df_omp = df_all_type.loc[df_all_type['algo_type'] == 'OMP']
+        df = df_omp.loc[df_omp['algo_step'] == step]
+        df = df.sort_values(by='abs_pos_err', ascending=ascending)
+        return df
+    
+    def computeMMPMSE(self, mmpdf_db_path:str) -> Dict:
+        """
+        Compute the position errors for all the signals.
+        """
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
 
-    def plotMMPDFPosErrComparison(self, mmpdf_db_path:str) :
+        data_errors = {
+            'id': [],
+            'snr': [],
+            'sparsity': [],
+            'omp-mse': [],  
+            'mmp-mse': []
+        }
+        # Iterate over the outputs
+        for result in output_data['mmp'] :
+
+            # Get the MMP approximation
+            signal_id = result['id']
+            mmp_tree_dict = result['mmp-tree']
+            mmp_approx_dict, mmp_approx_mse = self.getArgminMSEFromMMPTree(mmp_tree_dict)
+            mmp_approx_atoms = mmp_approx_dict['atoms']
+
+            # Get the OMP approximation
+            omp_path_str = '-'.join(['1']*result['sparsity'])
+            omp_approx_mse = mmp_tree_dict[omp_path_str]['mse']
+            omp_approx_atoms = mmp_tree_dict[omp_path_str]['atoms']
+
+            # Get the signal from the approx id
+            signal_dict = self.signalDictFromId(signal_id)
+            signal_atoms = signal_dict['atoms']
+
+            # Compute errors
+            data_errors['id'].append(signal_id)
+            data_errors['snr'].append(signal_dict['snr'])
+            data_errors['sparsity'].append(signal_dict['sparsity'])
+            data_errors['omp-mse'].append(omp_approx_mse)
+            data_errors['mmp-mse'].append(mmp_approx_mse)
+            
+        return data_errors
+    
+    def sortByOMPMSE(self, mmpdf_db_path:str, ascending:bool=True) :
+        """
+        Sort the position errors by the OMP position error at a given step.
+        """
+        data_errors = self.computeMMPMSE(mmpdf_db_path)
+        df= pd.DataFrame(data_errors)
+        df = df.sort_values(by='omp-mse', ascending=ascending)
+        return df
+
+    def boxplotMMPDFPosErrComparison(self, mmpdf_db_path:str) :
         """
         Plot the boxplot of the position errors
         Args:
@@ -662,7 +680,7 @@ class CSCWorkbench:
         plt.legend(title='Algo', loc='best')
         plt.show()
 
-    def plotMMPDFPosErrAtSparsity(self, mmpdf_db_path:str, sparsity:int) :
+    def boxplotMMPDFPosErrAtSparsity(self, mmpdf_db_path:str, sparsity:int) :
         """
         Plot the boxplot of the position errors for a given sparsity.
         Args:
@@ -683,7 +701,7 @@ class CSCWorkbench:
         plt.legend(title='Algo', loc='best')
         plt.show()
 
-    def plotMMPDFPosErrAtStep(self, mmpdf_db_path:str, step:int) :
+    def boxplotMMPDFPosErrAtStep(self, mmpdf_db_path:str, step:int) :
         """
         Plot the boxplot of the position errors for a given sparsity.
         Args:
