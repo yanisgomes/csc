@@ -545,17 +545,18 @@ class ZSDictionary() :
         if verbose :
             print(f"MMP-DF Pipeline results saved in {output_filename}")
 
+                                                                                    
+#       ,o888888o.    8 888888888o   8 888888888o   8 888888888o.      b.             8 
+#      8888     `88.  8 8888    `88. 8 8888    `88. 8 8888    `^888.   888o.          8 
+#   ,8 8888       `8. 8 8888     `88 8 8888     `88 8 8888        `88. Y88888o.       8 
+#   88 8888           8 8888     ,88 8 8888     ,88 8 8888         `88 .`Y888888o.    8 
+#   88 8888           8 8888.   ,88' 8 8888.   ,88' 8 8888          88 8o. `Y888888o. 8 
+#   88 8888           8 8888888888   8 888888888P'  8 8888          88 8`Y8o. `Y88888o8 
+#   88 8888           8 8888    `88. 8 8888         8 8888         ,88 8   `Y8o. `Y8888 
+#   `8 8888       .8' 8 8888      88 8 8888         8 8888        ,88' 8      `Y8o. `Y8 
+#      8888     ,88'  8 8888    ,88' 8 8888         8 8888    ,o88P'   8         `Y8o.` 
+#       `8888888P'    8 888888888P   8 8888         8 888888888P'      8            `Yo 
 
-#________/\\\\\\\\\__/\\\\\\\\\\\\\____/\\\\\\\\\\\\\____/\\\\\\\\\\\\_____/\\\\\_____/\\\_        
-# _____/\\\////////__\/\\\/////////\\\_\/\\\/////////\\\_\/\\\////////\\\__\/\\\\\\___\/\\\_       
-#  ___/\\\/___________\/\\\_______\/\\\_\/\\\_______\/\\\_\/\\\______\//\\\_\/\\\/\\\__\/\\\_      
-#   __/\\\_____________\/\\\\\\\\\\\\\\__\/\\\\\\\\\\\\\/__\/\\\_______\/\\\_\/\\\//\\\_\/\\\_     
-#    _\/\\\_____________\/\\\/////////\\\_\/\\\/////////____\/\\\_______\/\\\_\/\\\\//\\\\/\\\_    
-#     _\//\\\____________\/\\\_______\/\\\_\/\\\_____________\/\\\_______\/\\\_\/\\\_\//\\\/\\\_   
-#      __\///\\\__________\/\\\_______\/\\\_\/\\\_____________\/\\\_______/\\\__\/\\\__\//\\\\\\_  
-#       ____\////\\\\\\\\\_\/\\\\\\\\\\\\\/__\/\\\_____________\/\\\\\\\\\\\\/___\/\\\___\//\\\\\_ 
-#        _______\/////////__\/////////////____\///______________\////////////_____\///_____\/////__
-    
     def cbpdnFromDict(self, signal_dict:dict, verbose:bool=False) -> dict:
         # Extraction et préparation des données similaires à avant
         signal = np.array(signal_dict['signal'])
@@ -570,7 +571,7 @@ class ZSDictionary() :
         print(f'Dictionary shape : {D.shape}')
         print(f'Signal shape : {signal.shape}')
 
-        lmbda =1e-4
+        lmbda = 1e-4
 
         opt = cbpdn.ConvBPDN.Options({
             'Verbose': True,
@@ -588,7 +589,6 @@ class ZSDictionary() :
         print(f'X shape : {X.shape}')
         print(f'Non-zero in X : {np.argwhere(X != 0)}')
         print(f'Approx shape : {approx.shape}')
-        print(f'Non-zero in approx : {np.argwhere(approx != 0)}')
 
         # Emballage des résultats
         cbpdn_result = {
@@ -620,10 +620,9 @@ class ZSDictionary() :
         X = cbpdn_result['coefficients']
         cbpdn_signal = cbpdn_result['approx']
 
-        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-        axs[0].plot(signal_dict['signal'], label='Original', color='k', lw=3, alpha=0.5)
-        axs[0].plot(cbpdn_signal, label='CBPDN', color='r', lw=2)
-        axs[0].legend()
-        axs[0].set_title('CBPDN Signal Recovery')
+        plt.plot(signal_dict['signal'], label='Original', color='k', lw=3, alpha=0.5)
+        plt.plot(cbpdn_signal, label='CBPDN', color='r')
+        plt.legend()
+        plt.set_title('CBPDN Signal Recovery')
         plt.show()
 
