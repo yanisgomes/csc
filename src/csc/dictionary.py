@@ -15,10 +15,7 @@ from scipy.signal import oaconvolve
 
 from joblib import Parallel, delayed
 
-import sporco.dictlrn.cbpdndl as cbpdndl
-import sporco.cnvrep as cr
-import sporco.linalg as spl
-import sporco.util as spu
+import sporco.admm.cbpdn as cbpdn
 
 from .atoms import ZSAtom
 from .mmp import MMPTree
@@ -110,7 +107,10 @@ class ZSDictionary() :
 
     def getAtoms(self) -> List[ZSAtom] :
         return self.atoms
-    
+
+    def getLocalDictionary(self) -> np.ndarray:
+        return np.array([atom() for atom in self.atoms])
+        
     def getAtomsLength(self) -> int :
         return self.atoms_length
     
@@ -555,26 +555,48 @@ class ZSDictionary() :
 #      __\///\\\__________\/\\\_______\/\\\_\/\\\_____________\/\\\_______/\\\__\/\\\__\//\\\\\\_  
 #       ____\////\\\\\\\\\_\/\\\\\\\\\\\\\/__\/\\\_____________\/\\\\\\\\\\\\/___\/\\\___\//\\\\\_ 
 #        _______\/////////__\/////////////____\///______________\////////////_____\///_____\/////__
+    
+    def cbpdnFromDict(self, signal_dict:dict, verbose:bool=False) -> dict:
+        # Extraction et préparation des données similaires à avant
+        signal = np.array(signal_dict['signal'])
+        D = self.getLocalDictionary().T
 
-    def cbpdnFromDict(self, signal_dict:dict, lmbda:float, verbose:bool=False) -> dict:
-        """Recover the sparse signal from a dictionary of the signal using CBPDN algorithm"""
-        # Extract the signal and the dictionary
-        signal = signal_dict['signal']
-        sparsity_level = len(signal_dict['atoms'])
-        D = self.atoms
+        if signal.ndim == 1:
+            signal = signal[np.newaxis, :]  # Assurez que le signal est 2D
 
-        # Ensure the dictionary is in the correct format for SPORCO
-        D = np.array(D)
+        if D.ndim == 2:
+            D = D[:, np.newaxis, :]  # Ajoute un axe pour SPORCO
 
-        # Solve the CSC problem using CBPDN
-        opt = cbpdndl.ConvBPDN.Options({'Verbose': verbose, 'MaxMainIter': 100, 'RelStopTol': 1e-3, 'AuxVarObj': False})
-        b = cbpdndl.ConvBPDN(D, signal, lmbda, opt)
+        print(f'Dictionary shape : {D.shape}')
+        print(f'Signal shape : {signal.shape}')
+
+        lmbda = 0.01
+
+        opt = cbpdn.ConvBPDN.Options({
+            'Verbose': True,
+            'MaxMainIter': 250,
+            'RelStopTol': 5e-3,
+            'HighMemSolve': True,
+            'AuxVarObj': False
+        })
+                
+        #opt = cbpdn.ConvBPDN.Options({'Verbose': verbose,
+        #                              'MaxMainIter': 100,
+        #                              'RelStopTol': 1e-3,
+        #                              'AuxVarObj': False})
+        b = cbpdn.ConvBPDN(D, signal, lmbda, opt)
         X = b.solve()
+        approx = b.reconstruct(X).squeeze()
+        print(f'X shape : {X.shape}')
+        print(f'Non-zero in X : {np.argwhere(X != 0)}')
+        print(f'Approx shape : {approx.shape}')
+        print(f'Non-zero in approx : {np.argwhere(approx != 0)}')
 
-        # Package the results
+        # Emballage des résultats
         cbpdn_result = {
             'id': signal_dict['id'],
-            'sparsity': sparsity_level,
+            'sparsity': len(signal_dict['atoms']),
+            'approx': approx,
             'coefficients': X
         }
         return cbpdn_result
@@ -589,12 +611,21 @@ class ZSDictionary() :
         if verbose :
             print(f"MMP-DF Pipeline from {db_filename} with {len(data['signals'])} signals")
 
-        # CBPDN parameters
-        lmbda = 0.1
-
         # Extract the signals from the DB
         signals = data['signals']
 
-        signal_dict = signals[0]
+        signal_dict = signals[2138]
+        print(signal_dict)
 
-        return self.cbpdnFromDict(signal_dict, lmbda, verbose=True)
+        cbpdn_result = self.cbpdnFromDict(signal_dict, verbose=True)
+
+        X = cbpdn_result['coefficients']
+        cbpdn_signal = cbpdn_result['approx']
+
+        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+        axs[0].plot(signal_dict['signal'], label='Original', color='k', lw=3, alpha=0.5)
+        axs[0].plot(cbpdn_signal, label='CBPDN', color='r', lw=2)
+        axs[0].legend()
+        axs[0].set_title('CBPDN Signal Recovery')
+        plt.show()
+
