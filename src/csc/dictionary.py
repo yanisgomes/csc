@@ -16,6 +16,7 @@ from scipy.signal import oaconvolve
 from joblib import Parallel, delayed
 
 import sporco.admm.cbpdn as cbpdn
+from alphacsc.update_z import update_z
 
 from .atoms import ZSAtom
 from .mmp import MMPTree
@@ -545,62 +546,164 @@ class ZSDictionary() :
         if verbose :
             print(f"MMP-DF Pipeline results saved in {output_filename}")
 
-                                                                                    
-#       ,o888888o.    8 888888888o   8 888888888o   8 888888888o.      b.             8 
-#      8888     `88.  8 8888    `88. 8 8888    `88. 8 8888    `^888.   888o.          8 
-#   ,8 8888       `8. 8 8888     `88 8 8888     `88 8 8888        `88. Y88888o.       8 
-#   88 8888           8 8888     ,88 8 8888     ,88 8 8888         `88 .`Y888888o.    8 
-#   88 8888           8 8888.   ,88' 8 8888.   ,88' 8 8888          88 8o. `Y888888o. 8 
-#   88 8888           8 8888888888   8 888888888P'  8 8888          88 8`Y8o. `Y88888o8 
-#   88 8888           8 8888    `88. 8 8888         8 8888         ,88 8   `Y8o. `Y8888 
-#   `8 8888       .8' 8 8888      88 8 8888         8 8888        ,88' 8      `Y8o. `Y8 
-#      8888     ,88'  8 8888    ,88' 8 8888         8 8888    ,o88P'   8         `Y8o.` 
-#       `8888888P'    8 888888888P   8 8888         8 888888888P'      8            `Yo 
 
-    def cbpdnFromDict(self, signal_dict:dict, verbose:bool=False) -> dict:
+#          888           888                      e88~-_  ,d88~~\  e88~-_  
+#  /~~~8e  888 888-~88e  888-~88e   /~~~8e       d888   \ 8888    d888   \ 
+#      88b 888 888  888b 888  888       88b ____ 8888     `Y88b   8888     
+# e88~-888 888 888  8888 888  888  e88~-888      8888      `Y88b, 8888     
+#C888  888 888 888  888P 888  888 C888  888      Y888   /    8888 Y888   / 
+# "88_-888 888 888-_88"  888  888  "88_-888       "88_-~  \__88P'  "88_-~  
+#              888                                                         
+                                                                                                 
+
+    def alphaCSCResult(self, signal_dict:dict, lmbda:float, verbose:bool=False) -> dict:
         # Extraction et préparation des données similaires à avant
         signal = np.array(signal_dict['signal'])
-        D = self.getLocalDictionary().T
+        D = self.getLocalDictionary()
 
         if signal.ndim == 1:
-            signal = signal[np.newaxis, :]  # Assurez que le signal est 2D
+            signal = signal[np.newaxis, :]
 
-        if D.ndim == 2:
-            D = D[:, np.newaxis, :]  # Ajoute un axe pour SPORCO
+        activations = update_z(signal, D, lmbda).squeeze() # (n_atoms, n_times)
+        
+        # Finding non-zero entries in activations to identify active atoms and their positions
+        nnz_indexes = np.nonzero(activations)  # Returns a tuple of arrays (row_indices, col_indices)
+        atoms_idx, positions_idx = nnz_indexes
 
-        print(f'Dictionary shape : {D.shape}')
-        print(f'Signal shape : {signal.shape}')
+        if verbose:
+            print(f'Nb positions: {len(positions_idx)}')
+            print(f'Nb atoms: {len(atoms_idx)}')
 
-        lmbda = 1e-4
-
-        opt = cbpdn.ConvBPDN.Options({
-            'Verbose': True,
-            'MaxMainIter': 200,
-            'RelStopTol': 1e-5,
-            'AutoRho': {'Enabled': True, 'Period': 1, 'StdResiduals': True},
-            'RelaxParam': 1.8,
-            'rho': 10,  # Commencez avec une valeur initiale raisonnable
-            'HighMemSolve': True
-        })
-                
-        b = cbpdn.ConvBPDN(D, signal, lmbda, opt)
-        X = b.solve()
-        approx = b.reconstruct(X).squeeze()
-        print(f'X shape : {X.shape}')
-        print(f'Non-zero in X : {np.argwhere(X != 0)}')
-        print(f'Approx shape : {approx.shape}')
-
-        # Emballage des résultats
-        cbpdn_result = {
-            'id': signal_dict['id'],
-            'sparsity': len(signal_dict['atoms']),
-            'approx': approx,
-            'coefficients': X
+        # Packaging the results
+        csc_result = {
+            'activations': activations,
+            'atoms_idx': atoms_idx,  # Indices of atoms that are active
+            'positions_idx': positions_idx,  # Positions in the signal where these atoms are active
         }
-        return cbpdn_result
 
-    def testCBPDNPipeline(self, db_filename, verbose:bool=False) :
+        return csc_result
+    
+    def alphaCSCResult(self, signal_dict:dict, lmbda:float) -> dict:
+        # Extraction et préparation des données similaires à avant
+        signal = np.array(signal_dict['signal'])
+        D = self.getLocalDictionary()
 
+        if signal.ndim == 1:
+            signal = signal[np.newaxis, :]
+
+        activations = update_z(signal, D, lmbda).squeeze() # (n_atoms, n_times)
+        
+        # Finding non-zero entries in activations to identify active atoms and their positions
+        nnz_indexes = np.nonzero(activations)  # Returns a tuple of arrays (row_indices, col_indices)
+        atoms_idx, positions_idx = nnz_indexes
+
+        # Packaging the results
+        csc_result = {
+            'activations': activations,
+            'atoms_idx': atoms_idx,  # Indices of atoms that are active
+            'positions_idx': positions_idx,  # Positions in the signal where these atoms are active
+        }
+
+        return csc_result
+    
+    def alphaCSCGetOptimalLambda(self, signal_dict, verbose=False) :
+        """
+        Calibrate the alphaCSC algorithm with the best lambda
+        Returns:
+            lambda_nnz : the lambda corresponding to the last number of non-zero activation
+            list_nb_activations[last_nnz_index] : the number of activations corresponding to the last number of non-zero activation
+        """
+        nb_lambdas = 10
+        max_activations = 100
+        list_lambdas = np.logspace(-4, 3, nb_lambdas)
+        lambda_nnz = None
+        # Find the lambda that gives a number of activations less than max_activations
+        iter_counter = 0
+        while True :
+            iter_counter += 1  
+            if verbose : 
+                print('    Calibration interval n°{} [{:.2e}, {:.2e}] :'.format(iter_counter, list_lambdas[0], list_lambdas[-1]))
+            
+            list_nb_activations = list()
+            for i, lmbda in enumerate(list_lambdas) :   
+                csc_result = self.alphaCSCResult(signal_dict, lmbda)
+                nb_activations = len(csc_result['atoms_idx'])
+                list_nb_activations.append(nb_activations)
+                if verbose :
+                    print('       {} - lmba = {:.2e} : nb_act = {}'.format(i, lmbda, nb_activations))
+
+            last_nnz_index = next((i for i, val in enumerate(list_nb_activations) if val == 0), nb_lambdas) - 1
+            if verbose :
+                print('   >>> Last non-zero index : {} for {} activations'.format(last_nnz_index, list_nb_activations[last_nnz_index]))
+
+            if list_nb_activations[last_nnz_index] > max_activations :
+                lambda_nnz = list_lambdas[last_nnz_index]
+                lambda_zero = list_lambdas[last_nnz_index+1]
+                list_lambdas = np.logspace(np.log10(lambda_nnz), np.log10(lambda_zero), nb_lambdas)
+            else :
+                break
+        if verbose :
+            print('Optimal lambda for {} activations : {}'.format(list_nb_activations[last_nnz_index], lambda_nnz))
+        return lambda_nnz, list_nb_activations[last_nnz_index]
+
+    def alphaCSCCalibrationPerSNR(self, db_signals:str, snr:int, nb_signals:int, verbose:bool=False) :
+        """
+        Calibrate the alphaCSC algorithm with the lambda corresponding to the nb of atoms
+        """
+        assert nb_signals <= 1000, "The number of signals must be less than 1000"
+
+        with open(db_signals, 'r') as json_file:
+            data = json.load(json_file)
+            if data is None:
+                raise ValueError("The input file is empty or does not contain any data.")
+            
+        signals = data['signals']
+        signals = [signal for signal in signals if signal['snr'] == snr]
+        signals = signals[:nb_signals]
+
+        listOptLambdas = []
+
+        for i, signal_dict in enumerate(signals):
+            opt_lambda, nb_activations = self.alphaCSCGetOptimalLambda(signal_dict, verbose=verbose)
+            listOptLambdas.append(opt_lambda)
+            if verbose :
+                print(f'Signal {i} : lambda = {opt_lambda} for {nb_activations} activations')
+
+        lambda_opt = np.max(listOptLambdas)
+        if verbose :
+            print(f'Optimal lambda for SNR={snr} : {lambda_opt}')
+        return lambda_opt
+
+    def alphaCSCCalibrationPipeline(self, db_filename, verbose:bool=False) :
+        """
+        Calibrate the alphaCSC algorithm with the best lambda for a batch of signal_dicts.
+        Args:
+            db_filename (str): The name of the input file containing the signals database
+            verbose (bool, optional): Whether to print calibration details. Defaults to False.
+        Returns:
+            Tuple[List[float], List[float]]: The list of best lambdas and the corresponding list of best MSEs.
+        """
+        with open(db_filename, 'r') as json_file:
+            data = json.load(json_file)
+        
+        # Extract the signals from the DB
+        signals = data['signals']
+        
+        list_best_lmbda = []
+        list_best_mse = []
+        
+        for signal_dict in signals:
+            best_lmbda, best_mse = self.alphaCSCCalibration(signal_dict, verbose=verbose)
+            list_best_lmbda.append(best_lmbda)
+            list_best_mse.append(best_mse)
+        
+        return list_best_lmbda, list_best_mse
+
+        
+    def alphaCSCPipeline(self, db_filename, verbose:bool=False) :
+        """
+        Create a pipeline of alphaCSC l1-algorithm from the database of signals.
+        """
         with open(db_filename, 'r') as json_file:
             data = json.load(json_file)
             if data is None:
@@ -611,18 +714,24 @@ class ZSDictionary() :
 
         # Extract the signals from the DB
         signals = data['signals']
+        snr_level = 15
+        signal_dict = next((signal for signal in signals if signal['snr'] == snr_level), None)
 
-        signal_dict = signals[2440]
-        print(signal_dict)
+        csc_result = self.alphaCSCResult(signal_dict, verbose=verbose)
+        activations = csc_result['activations']
+        positions_idx = csc_result['positions_idx']
+        atoms_idx = csc_result['atoms_idx']
 
-        cbpdn_result = self.cbpdnFromDict(signal_dict, verbose=True)
-
-        X = cbpdn_result['coefficients']
-        cbpdn_signal = cbpdn_result['approx']
+        atoms_signals = np.array([atom() for atom in self.atoms])
+        approx = oaconvolve(activations.T, atoms_signals.T, mode='full', axes=0).sum(axis=1)
+        
+        if verbose :
+            print(f'Nb positions: {len(positions_idx)}')
+            print(f'Nb atoms: {len(atoms_idx)}')
 
         plt.plot(signal_dict['signal'], label='Original', color='k', lw=3, alpha=0.5)
-        plt.plot(cbpdn_signal, label='CBPDN', color='r')
+        plt.plot(approx, label='alphaCSC', color='r')
         plt.legend()
-        plt.set_title('CBPDN Signal Recovery')
+        plt.title('$\ell_1$-norm CSC Signal Recovery')
         plt.show()
 

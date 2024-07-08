@@ -347,7 +347,7 @@ class CSCWorkbench:
         df = df_all_steps.loc[df_all_steps['algo_step'] == step]
         df = df.sort_values(by='abs_pos_err', ascending=ascending)
         return df
-    
+
 
 
 
@@ -456,8 +456,9 @@ class CSCWorkbench:
             axs[i+1].plot(approx, color=f'C{i}')
             axs[i+1].plot(signal_dict['signal'], color='k', alpha=0.4, lw=3)
             axs[i+1].set_title('{} : MSE = {:.2e}'.format(results_name[i], result_dict["mse"]), fontsize=12)
+            axs[0].legend(loc='best')
             axs[i+1].axis('off')  
-
+            
         axs[0].legend(loc='best') 
         axs[0].axis('off')
         plt.show()
@@ -623,7 +624,8 @@ class CSCWorkbench:
             'snr': [],
             'sparsity': [],
             'omp-mse': [],  
-            'mmp-mse': []
+            'mmp-mse': [],
+            'mse-diff': [],
         }
         # Iterate over the outputs
         for result in output_data['mmp'] :
@@ -649,6 +651,7 @@ class CSCWorkbench:
             data_errors['sparsity'].append(signal_dict['sparsity'])
             data_errors['omp-mse'].append(omp_approx_mse)
             data_errors['mmp-mse'].append(mmp_approx_mse)
+            data_errors['mse-diff'].append((omp_approx_mse - mmp_approx_mse)/omp_approx_mse)
             
         return data_errors
     
@@ -660,6 +663,16 @@ class CSCWorkbench:
         df= pd.DataFrame(data_errors)
         df = df.sort_values(by='omp-mse', ascending=ascending)
         return df
+
+    def sortByBestMSEDiff(self, mmpdf_db_path:str, ascending:bool=True) :
+        """
+        Sort the position errors by the relative difference between OMP and MMP MSE
+        """
+        data_errors = self.computeMMPMSE(mmpdf_db_path)
+        df= pd.DataFrame(data_errors)
+        df = df.sort_values(by='mse-diff', ascending=ascending)
+        return df
+        
 
     def boxplotMMPDFPosErrComparison(self, mmpdf_db_path:str) :
         """
@@ -1603,4 +1616,144 @@ class CSCWorkbench:
             
         return data_prct_overlap_type
     
+                                                                                          
+# 8 8888     ,o888888o.           .8.            d888888o.      d888888o.   8 888888888o   
+# 8 8888    8888     `88.        .888.         .`8888:' `88.  .`8888:' `88. 8 8888    `88. 
+# 8 8888 ,8 8888       `8.      :88888.        8.`8888.   Y8  8.`8888.   Y8 8 8888     `88 
+# 8 8888 88 8888               . `88888.       `8.`8888.      `8.`8888.     8 8888     ,88 
+# 8 8888 88 8888              .8. `88888.       `8.`8888.      `8.`8888.    8 8888.   ,88' 
+# 8 8888 88 8888             .8`8. `88888.       `8.`8888.      `8.`8888.   8 888888888P'  
+# 8 8888 88 8888            .8' `8. `88888.       `8.`8888.      `8.`8888.  8 8888         
+# 8 8888 `8 8888       .8' .8'   `8. `88888.  8b   `8.`8888. 8b   `8.`8888. 8 8888         
+# 8 8888    8888     ,88' .888888888. `88888. `8b.  ;8.`8888 `8b.  ;8.`8888 8 8888         
+# 8 8888     `8888888P'  .8'       `8. `88888. `Y8888P ,88P'  `Y8888P ,88P' 8 8888         
+
+    def plotSignalOverlapFromId(self, id:int) -> None :
+        """
+        Plot the signal with a conditional coloring according to the overlap vector.
+        """
+        # Get the signal dictionary
+        signal_dict = self.signalDictFromId(id)
+        atoms_list = signal_dict['atoms']
+        overlap_vector = self.getSignalOverlapVectorFromId(id)
+
+        # Plot the signal
+        fig, axs = plt.subplots(2, 1, figsize=(12, 2*2), sharex=True)
+        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
+        true_signal = np.zeros_like(signal_dict['signal'])
+
+        # Color the background based on overlap
+        cmap = plt.get_cmap('plasma')
+        max_overlap = max(overlap_vector)
+        norm = Normalize(vmin=0, vmax=max_overlap)
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+
+        for idx, val in enumerate(overlap_vector):
+            axs[0].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+            axs[1].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+
+        # Compute the atoms signals
+        offset = 1.5*max(np.abs(signal_dict['signal']))
+        for i, atom in enumerate(atoms_list):
+            zs_atom = ZSAtom.from_dict(atom)
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
+            true_signal += atom_signal
+            # Plot the atom's signal
+            axs[1].plot(atom_signal + i*offset, label=f'Atom at {atom["x"]}', alpha=0.6, lw=2)
+
+        axs[0].plot(true_signal, label='True signal', color='g', lw=2)   
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+        #axs[1].legend(loc='best')
+        axs[1].axis('off')
+
+        # Add a colorbar
+        fig.colorbar(sm, ax=axs, orientation='vertical', label='Overlap level', pad=0.01)
+        plt.show()
+    
+    def plotMethodComparison(self, mmpdf_db_path:str, id:int) -> None :
+        """
+        Use three subplots to compare the results between the OMP and the MMP results.
+        The OMP result corresponds to the first branch of the MMP tree.
+        The MMP result corresponds to the MSE-argmin of the MMP tree.
+        """
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+        
+        # Get the true signal
+        signal_dict = self.signalDictFromId(id)
+        true_atoms = signal_dict['atoms']
+        true_signal = np.zeros_like(signal_dict['signal'])
+        for atom_dict in true_atoms :
+            zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['s'])
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
+            true_signal += atom_signal
+
+        fig, axs = plt.subplots(3, 1, figsize=(15, 4*3), sharex=True)
+        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
+        axs[0].plot(true_signal, label='True signal', color='g')
+
+        # Get the overlap vector of the signal
+        overlap_vector = self.getSignalOverlapVectorFromId(id)
+
+        # Create the color map
+        cmap = plt.get_cmap('plasma')
+        max_overlap = max(overlap_vector)
+        norm = Normalize(vmin=0, vmax=max_overlap)
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+
+        for idx, val in enumerate(overlap_vector):
+            axs[0].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.2)
+            axs[1].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.2)
+            axs[2].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.2)
+            
+        # Find the OMP and the MMP dict
+        min_mse = np.inf
+        mmp_dict = None
+        mmp_path = None
+        mmp_tree_dict = mmp_result_dict['mmp-tree']
+
+        for path_str, leaf_dict in mmp_tree_dict.items() :
+            if all(c == '1' for c in path_str.split('-')) :
+                omp_dict = leaf_dict
+            if leaf_dict['mse'] <= min_mse :
+                mmp_dict = leaf_dict
+                min_mse = leaf_dict['mse']
+                mmp_path = path_str
+
+        # Extract the atoms from the dict
+        results_dict = [omp_dict, mmp_dict]
+        results_name = ['OMP', f'MMP {mmp_path}']
+
+        # Plot the comparison
+        for i, result_dict in enumerate(results_dict) :
+            approx = np.zeros_like(signal_dict['signal'])
+            atoms_dict = result_dict['atoms']
+            for atom_dict in atoms_dict :
+                zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['s'])
+                zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
+                approx += atom_signal
+            axs[i+1].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
+            axs[i+1].plot(true_signal, color='g', label='True signal')
+            axs[0].plot(approx, color=f'C{i}', label=results_name[i])
+            axs[i+1].plot(approx, color=f'C{i}', label=results_name[i])
+            axs[i+1].set_title('       {} : MSE = {:.2e}'.format(results_name[i], result_dict["mse"]), fontsize=14, loc='left')
+            axs[i+1].legend(loc='best')
+            axs[i+1].axis('off')  
+        axs[0].set_title('       True signal', fontsize=14, loc='left')
+        axs[0].legend(loc='best') 
+        axs[0].axis('off')
+
+        # Add a colorbar
+        cbar = fig.colorbar(sm, ax=axs, orientation='vertical', label='Overlap level', pad=0.01)
+        cbar.solids.set(alpha=0.4)
+
+        plt.show()
 
