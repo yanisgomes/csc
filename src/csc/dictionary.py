@@ -455,6 +455,132 @@ class ZSDictionary() :
         if verbose :
             print(f"OMP Pipeline results saved in {output_filename}")
 
+    #                __    __     ______  
+    #               /\ "-./  \   /\  == \ 
+    #               \ \ \-./\ \  \ \  _-/ 
+    #                \ \_\ \ \_\  \ \_\   
+    #                 \/_/  \/_/   \/_/                                     
+
+    @time_decorator
+    def mp(self, signal: np.ndarray, sparsity_level: int, verbose: bool = False) -> Tuple[np.ndarray, List[dict]]:
+        """Matching Pursuit algorithm to recover the sparse signal
+        Args:
+            signal (np.ndarray): The input signal to recover
+            sparsity_level (int): The sparsity level of the signal
+        Returns:
+            np.ndarray: The matrix of the chosen atoms for the signal
+            list: The list of dictionaries containing the parameters of each atom
+        """
+        if not isinstance(signal, np.ndarray):
+            signal = np.array(signal)
+        (signal_length,) = signal.shape
+        nb_valid_offset = signal_length - self.atoms_length + 1
+        nb_atoms = len(self.atoms)
+
+        # Activation mask parameters
+        nb_activations = nb_valid_offset * len(self.atoms)
+        activation_mask = np.zeros((nb_activations,), dtype=np.float64)
+        iter = 0
+        residual = signal
+        selected_atoms = []
+
+        while iter < sparsity_level:
+            if verbose:
+                print("MP {}/{}".format(iter + 1, sparsity_level))
+
+            # Compute the correlation between the residual and the dictionary
+            all_correlations = self.computeCorrelations(residual)
+            max_corr_idx_flat = all_correlations.argmax()
+            max_corr_idx = np.unravel_index(max_corr_idx_flat, all_correlations.shape)
+            max_corr_value = all_correlations[max_corr_idx]
+            activation_mask[max_corr_idx_flat] += max_corr_value
+
+            # Compute the masked convolution operator
+            # This mask takes into account the previous activations
+            masked_conv_op = self.getMaskedConvOperator(activation_mask)
+
+            # Update the residual
+            approx = masked_conv_op @ activation_mask
+            residual = signal - approx
+            iter += 1
+
+        # Extract the sparse signal from the activations and sort them
+        (nnz_indexes,) = np.where(activation_mask)
+        nnz_values = activation_mask[nnz_indexes]
+        # Sort in descending order
+        order = np.argsort(nnz_values)[::-1] 
+        nnz_indexes = nnz_indexes[order]
+    
+        # Extract the atoms and their parameters
+        positions_idx, atoms_idx = np.unravel_index(
+            nnz_indexes,
+            shape=activation_mask.reshape(-1, len(self.atoms)).shape,
+        )
+
+        infos = list()
+        for pos_idx, atom_idx in zip(positions_idx, atoms_idx):
+            b, y, s = self.atoms[atom_idx].params['b'], self.atoms[atom_idx].params['y'], self.atoms[atom_idx].params['sigma']
+            infos.append({'x': pos_idx, 'b': b, 'y': y, 's': s})
+
+        return approx, infos
+
+    def mpFromDict(self, signal_dict: dict, verbose: bool = False) -> dict:
+        """Recover the sparse signal from a dictionary of the signal
+        Args:
+            signal_dict (dict): The dictionary of the signal
+        Returns:
+            result : MP results with the dict format
+        """
+        signal = signal_dict['signal']
+        sparsity_level = len(signal_dict['atoms'])
+        approx, infos = self.mp(signal, sparsity_level, verbose=verbose)
+        mse = np.mean((signal - approx)**2)
+        mp_result = {
+            'id': signal_dict['id'],
+            'mse': mse,
+            'sparsity': len(infos),
+            'approx': approx.tolist(),
+            'atoms': infos
+        }
+        return mp_result
+    
+    def mpPipelineFromDB(self, input_filename: str, output_filename: str, nb_cores: int, verbose=False):
+        """Create a pipeline of the MP algorithm from the database of signals.
+        Args:
+            input_filename (str): The name of the input file containing the signals database
+            output_filename (str): The name of the output file to store the results
+        Returns:
+            None : it saves the results in a file
+        """
+        with open(input_filename, 'r') as json_file:
+            data = json.load(json_file)
+            if data is None:
+                raise ValueError("The input file is empty or does not contain any data.")
+        
+        if verbose:
+            print(f"MP Pipeline from {input_filename} with {len(data['signals'])} signals")
+
+        # Extract the signals from the DB
+        signals = data['signals']
+        # Create the results dictionary
+        results = dict()
+        results['source'] = input_filename
+        results['date'] = get_today_date_str()
+        results['algorithm'] = 'Convolutional MP'
+        results['batchSize'] = data['batchSize']
+        results['snrLevels'] = data['snrLevels']
+        results['signalLength'] = data['signalLength']
+        results['sparsityLevels'] = data['sparsityLevels']
+        results['dictionary'] = str(self)
+        # Parallelize the MP algorithm on the signals from the DB
+        mp_results = Parallel(n_jobs=nb_cores)(delayed(self.mpFromDict)(signal_dict, verbose=verbose) for signal_dict in tqdm(signals, desc='MP Pipeline from DB'))
+        results['mp'] = mp_results
+        # Save the results in a JSON file
+        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
+        if verbose:
+            print(f"MP Pipeline results saved in {output_filename}")
+
+
 #            .         .                     .         .                          
 #           ,8.       ,8.                   ,8.       ,8.          8 888888888o   
 #          ,888.     ,888.                 ,888.     ,888.         8 8888    `88. 
