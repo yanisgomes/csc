@@ -673,14 +673,6 @@ class ZSDictionary() :
             print(f"MMP-DF Pipeline results saved in {output_filename}")
 
 
-#          888           888                      e88~-_  ,d88~~\  e88~-_  
-#  /~~~8e  888 888-~88e  888-~88e   /~~~8e       d888   \ 8888    d888   \ 
-#      88b 888 888  888b 888  888       88b ____ 8888     `Y88b   8888     
-# e88~-888 888 888  8888 888  888  e88~-888      8888      `Y88b, 8888     
-#C888  888 888 888  888P 888  888 C888  888      Y888   /    8888 Y888   / 
-# "88_-888 888 888-_88"  888  888  "88_-888       "88_-~  \__88P'  "88_-~  
-#              888                                                         
-                                                                                                 
 
     def alphaCSCResult(self, signal_dict:dict, lmbda:float, verbose:bool=False) -> dict:
         # Extraction et préparation des données similaires à avant

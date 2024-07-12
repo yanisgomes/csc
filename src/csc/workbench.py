@@ -9,9 +9,11 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from typing import List, Dict, Tuple, Any, Union
 from scipy import optimize
+from scipy.interpolate import interp1d
 
 from .dictionary import ZSDictionary
 from .atoms import ZSAtom
+from .mmp import MMPTree
 from .utils import *
 
 from matplotlib.colors import Normalize
@@ -347,10 +349,42 @@ class CSCWorkbench:
         df = df_all_steps.loc[df_all_steps['algo_step'] == step]
         df = df.sort_values(by='abs_pos_err', ascending=ascending)
         return df
+    
+#                __    __     ______  
+#               /\ "-./  \   /\  == \ 
+#               \ \ \-./\ \  \ \  _-/ 
+#                \ \_\ \ \_\  \ \_\   
+#                 \/_/  \/_/   \/_/                                     
+    
+    def processMPResults(self, mp_db_path:str) -> pd.DataFrame:
+        """
+        Process the MMP-DF results.
+        """
+        results = []
+        # Load the data
+        data = self.loadDataFromPath(mp_db_path)
+        # Iterate over the outputs
+        for result in data['mp'] :
+            # Get the MP result approximation
+            signal_id = result['id']
+            mp_approx_atoms = result['atoms']
+            
+            # Get the signal from the approx id
+            signal_dict = self.signalDictFromId(signal_id)
+            signal_atoms = signal_dict['atoms']
+            snr = signal_dict['snr']
 
+            result_mp = {
+                'snr' : snr,
+                'sparsity' : result['sparsity'],
+                'algo_type' : 'MP',
+                'true_atoms': signal_atoms,
+                'predicted_atoms': mp_approx_atoms
+            }
 
+            results.append(result_mp)
 
-
+        return {'results': results}
 
 
 #            .         .                     .         .                          
@@ -1756,4 +1790,406 @@ class CSCWorkbench:
         cbar.solids.set(alpha=0.4)
 
         plt.show()
+
+#    8888888b.   .d88888b.   .d8888b.  
+#    888   Y88b d88P" "Y88b d88P  Y88b 
+#    888    888 888     888 888    888 
+#    888   d88P 888     888 888        
+#    8888888P"  888     888 888        
+#    888 T88b   888     888 888    888 
+#    888  T88b  Y88b. .d88P Y88b  d88P 
+#    888   T88b  "Y88888P"   "Y8888P"  
+
+
+    def computeROCMetricsPosition(self, true_atoms:List[Dict], predicted_atoms:List[Dict]) -> Tuple:
+        """
+        Compute the ROC metrics for the given true and predicted atoms.
+        """
+        # Get the number of true and predicted atoms
+        nb_true_atoms = len(true_atoms)
+        nb_approx_atoms = len(predicted_atoms)
+
+        # Atom matching
+        matched_atoms = self.computeMatchingPosition(true_atoms, predicted_atoms)
+
+        # Compute the True Positive, False Positive and False Negative
+        position_errors = [abs(true_atom['x'] - predicted_atom['x']) for true_atom, predicted_atom in matched_atoms]
+        tp = sum(1 for error in position_errors if error <= 5)
+        fp = nb_approx_atoms - tp  
+        fn = nb_true_atoms - tp       
+
+        return tp, fp, fn, nb_true_atoms, nb_approx_atoms
+
+    def calculateROCMetrics(self, row:pd.Series) -> Tuple:
+        """
+        Calculate the ROC metrics for the given row and position
+        Returns:
+            pd.Series: (TPR, FPR)
+        """
+        true_atoms = row['true_atoms']
+        predicted_atoms = row['predicted_atoms']
+
+        tp, fp, fn, nb_true_atoms, nb_approx_atoms = self.computeROCMetricsPosition(true_atoms, predicted_atoms)
+
+        return pd.Series([tp, fp, fn, nb_true_atoms, nb_approx_atoms])
+
+    def computeROCDataframe(self, db_path:str, process_data_func) :
+        """ 
+        Return the ROC dataframes for the given MP database.
+        """
+        processed_results = process_data_func(db_path)
+        # Convert data to DataFrame
+        df = pd.DataFrame(processed_results['results'])
+
+        # Apply the metrics function
+        metrics = df.apply(self.calculateROCMetrics, axis=1)
+        df[['tp', 'fp', 'fn', 'nb_true_atoms', 'nb_predicted_atoms']] = metrics
+
+        # Compute the FPR
+        df['fpr'] = np.where((df['nb_true_atoms'] - df['tp'] + df['fp']) > 0, df['fp'] / (df['nb_true_atoms'] - df['tp'] + df['fp']), 0)
+
+        # Compute the TPR
+        df['tpr'] = np.where((df['tp'] + df['fn']) > 0, df['tp'] / (df['tp'] + df['fn']), 0)
+
+        return df
+        
+    def plotROC(self, mmpdf_db_path: str, mp_db_path: str) -> None :
+        """
+        Plot the F1 score by SNR for different algorithms and sparsity levels.
+        """
+        plt.figure(figsize=(12, 8))
+
+        # MMP-DF database
+        mmpdf_metrics_df = self.computeROCDataframe(db_path=mmpdf_db_path, process_data_func=self.processMMPDFResults)
+
+        # MP database
+        mp_metrics_df = self.computeROCDataframe(db_path=mp_db_path, process_data_func=self.processMPResults)
+
+        # Merge the dataframes
+        metrics_df = pd.concat([mmpdf_metrics_df, mp_metrics_df], ignore_index=True)
+
+        # Define colors and markers for the plots
+        colors = {'OMP': 'navy', 'MMP-DF': 'red', 'MP': 'green'}
+        markers = {3: 'o', 4: 'D', 5: 'X'}  # Example for up to 5 sparsity levelsprint(metrics_df.loc[metrics_df['algo_type'] == 'MMP-DF', 'fpr'].unique())
+
+        print(f"MMP-DF FPR : {metrics_df.loc[metrics_df['algo_type'] == 'MMP-DF', 'fpr'].unique()}")
+        print(f"MMP-DF TPR : {metrics_df.loc[metrics_df['algo_type'] == 'MMP-DF', 'tpr'].unique()}\n")
+        print(f"OMP FPR : {metrics_df.loc[metrics_df['algo_type'] == 'OMP', 'fpr'].unique()}")
+        print(f"OMP TPR : {metrics_df.loc[metrics_df['algo_type'] == 'OMP', 'tpr'].unique()}\n")
+        print(f"MP FPR : {metrics_df.loc[metrics_df['algo_type'] == 'MP', 'fpr'].unique()}")
+        print(f"MP TPR : {metrics_df.loc[metrics_df['algo_type'] == 'MP', 'tpr'].unique()}\n")
+
+        # Group data and plot
+        sns.lineplot(x='fpr', y='tpr', hue='algo_type', data=metrics_df, palette="flare")
+        sns.despine(trim=True)
+
+        plt.title(f'Receiver Operating Characteristic', fontsize=16)
+        plt.xlabel('False positive rate', fontsize=14)
+        plt.ylabel('True positive rate', fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.legend(title='Algorithm', loc='best', fontsize=12)
+        plt.grid(True)
+        plt.gca().xaxis.set_major_locator(ticker.MultipleLocator(5))
+        plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(0.1))
+        plt.show()
+
+                                                
+#       8 888888888o   8 888888888o.      ,o888888o.    
+#       8 8888    `88. 8 8888    `88.    8888     `88.  
+#       8 8888     `88 8 8888     `88 ,8 8888       `8. 
+#       8 8888     ,88 8 8888     ,88 88 8888           
+#       8 8888.   ,88' 8 8888.   ,88' 88 8888           
+#       8 888888888P'  8 888888888P'  88 8888           
+#       8 8888         8 8888`8b      88 8888           
+#       8 8888         8 8888 `8b.    `8 8888       .8' 
+#       8 8888         8 8888   `8b.     8888     ,88'  
+#       8 8888         8 8888     `88.    `8888888P'    
+
+    @staticmethod
+    def preprocessPRCurveDatas(pr: np.ndarray) -> np.ndarray:
+        """Preprocesses a precision-recall (PR) array for plotting by sorting the rows by
+        ascending recall values and inserting endpoints at recall=0 and recall=1.
+
+        This function is designed to prepare precision-recall data for smooth plotting and
+        interpolation by ensuring that the recall values are sorted in ascending order and
+        that the precision-recall curve includes endpoints at recall values of 0 and 1.
+
+        Parameters
+        ----------
+        pr : np.ndarray
+            A 2D numpy array with shape (n_pr, 2) where the first column contains precision
+            values and the second column contains recall values.
+
+        Returns
+        -------
+        np.ndarray
+            A 2D numpy array with shape (n_pr + 2, 2) where the rows are sorted by ascending
+            recall values, and additional rows are inserted at the beginning and end to
+            include the endpoints at recall=0 and recall=1.
+
+        Example
+        -------
+        >>> pr = np.array([[0.8, 0.1], [0.6, 0.4], [0.9, 0.3]])
+        >>> preprocess_pr_for_plot(pr)
+        array([[0.8, 0. ],
+        [0.8, 0.1],
+        [0.9, 0.3],
+        [0.6, 0.4],
+        [0.6, 1. ]])
+        """
+        prec, rec = pr.T
+
+        # sort by ascending recall values
+        sort_by_rec = np.argsort(rec)
+        pr_sorted = pr[sort_by_rec]
+
+        # insert point at recall=0
+        first_prec, first_rec = pr_sorted[0, 0], 0
+        pr_sorted = np.insert(
+            arr=pr_sorted, obj=0, values=np.array([first_prec, first_rec]), axis=0
+        )
+
+        # insert point at recall=1
+        last_prec, last_rec = pr_sorted[-1, 0], 1
+        pr_sorted = np.insert(
+            arr=pr_sorted,
+            obj=pr_sorted.shape[0],
+            values=np.array([last_prec, last_rec]),
+            axis=0,
+        )
+
+        return pr_sorted
+
+    @staticmethod
+    def plotPRCurve(pr: np.ndarray, ax=None, **plot_kwargs):
+        """
+        Plots a precision-recall curve using the same conventions as scikit-learn.
+
+        This function takes a precision-recall array and plots the corresponding precision-recall
+        curve. The precision-recall data is first preprocessed to ensure that recall values
+        are sorted and endpoints are added for smooth plotting.
+
+        Parameters
+        ----------
+        pr : np.ndarray
+            A 2D numpy array with shape (n_pr, 2) where the first column contains precision
+            values and the second column contains recall values.
+        ax : matplotlib.axes.Axes, optional
+            The axes object to draw the plot onto, or None to create a new figure and axes.
+        **plot_kwargs
+            Additional keyword arguments to pass to the `ax.plot` function.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes object with the precision-recall curve plotted.
+
+        Example
+        -------
+        >>> import numpy as np
+        >>> import matplotlib.pyplot as plt
+        >>> pr = np.array([[0.8, 0.1], [0.6, 0.4], [0.9, 0.3]])
+        >>> ax = plot_pr_curve(pr)
+        >>> plt.show()
+        """
+        if ax is None:
+            fig, ax = plt.subplots()
+
+        pr = CSCWorkbench.preprocessPRCurveDatas(pr)
+        prec, rec = pr.T
+        ax.plot(rec, prec, ls="--", drawstyle="steps-post", **plot_kwargs)
+        ax.set(
+            xlabel="Recall",
+            xlim=(-0.01, 1.01),
+            ylabel="Precision",
+            ylim=(-0.01, 1.01),
+            aspect="equal",
+        )
+        return ax
+
+    def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
+        """
+        Compute the precison-recall metrics for the given true and approx atoms.
+        """
+        # Get the number of true and approx atoms
+        nb_true_atoms = len(true_atoms)
+        nb_approx_atoms = len(approx_atoms)
+
+        # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
+        matched_atoms = self.computeMatchingPosition(true_atoms[:nb_approx_atoms], approx_atoms)
+
+
+        # Compute the True Positive, False Positive and False Negative
+        position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
+        tp = sum(1 for error in position_errors if error <= position_error_threshold)
+
+        # False Positives
+        fp = nb_true_atoms - tp  
+        fp += sparsity - nb_approx_atoms
+
+        # False Negatives
+        fn = nb_true_atoms - tp
+
+        # Calculate Precision and Recall
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+
+        if verbose :
+            print(f't({nb_true_atoms})  | a({nb_approx_atoms})  |  P : {precision}  | R : {recall} \n')
+            for match in matched_atoms :
+                print(f'    t : {match[0]["x"]}  |  a : {match[1]["x"]}  ==> {bool(abs(match[0]["x"] - match[1]["x"]) <= position_error_threshold)}')
+            print(f'    ==> TP : {tp}  |  FP : {fp}  |  FN : {fn} \n')
+            print('\n')
+
+        return precision, recall
+    
+    def extractPRCurveData(self, mmpdf_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> pd.DataFrame:
+        """
+        Process the MMP-DF results.
+        Args :
+            mmpdf_dict (dict) : The MMP-DF dictionary.
+            signal (np.ndarray) : The signal.
+            max_branches (int) : The maximum number of branches to consider.
+            max_sparsity (int) : The maximum sparsity level to consider.
+        Returns :
+            pd.DataFrame : The precision-recall dataframe.
+        """
+        # Retrieve the tree structure to the max number of branches
+        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches)
+        
+        # Retrieve the signal from the datas
+        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
+        signal = signal_dict['signal']
+        true_atoms = signal_dict['atoms']
+
+        # Initialize the precion-recall dataframe
+        precisions = []
+        recalls = []
+
+        # Iterate over the attended sparsity levels
+        sparsity_levels = [i+1 for i in range(max_sparsity)]
+        for candidate_sparsity in sparsity_levels :
+            candidate_atoms = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, signal, candidate_sparsity=candidate_sparsity)
+            precison, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
+            precisions.append(precison)
+            recalls.append(recall)
+
+        precision_recall_df = pd.DataFrame({'sparsity': sparsity_levels, 'precision': precisions, 'recall': recalls})
+        return precision_recall_df
+
+    def computeMeanPRCurve(all_pr, n_samples):
+        """
+        Computes the mean Precision-Recall (PR) curve along with the curves
+        representing one standard deviation above and below the mean.
+
+        Parameters:
+        -----------
+        all_pr : list of numpy.ndarray
+            A list where each element is a numpy array of shape (n_pr, 2)
+            representing precision and recall values.
+        n_samples : int
+            The desired number of samples for the approximation.
+
+        Returns:
+        --------
+        pr_mean : numpy.ndarray
+            A 2D array where the first column contains the mean precision values
+            and the second column contains the corresponding recall values.
+        pr_mean_plus_std : numpy.ndarray
+            A 2D array where the first column contains the mean precision values
+            plus one standard deviation and the second column contains the
+            corresponding recall values.
+        pr_mean_minus_std : numpy.ndarray
+            A 2D array where the first column contains the mean precision values
+            minus one standard deviation and the second column contains the
+            corresponding recall values.
+
+        Notes:
+        ------
+        This function interpolates the precision values for a common recall axis
+        ranging from 0 to 1, then computes the mean and standard deviation of
+        these interpolated precision values across all provided PR curves.
+        """
+        n_pr = len(all_pr)
+        recall_axis = np.linspace(0, 1, n_samples, endpoint=True)
+
+        all_approx = np.empty((n_pr, n_samples))
+
+        for k_pr in range(n_pr):
+            pr = all_pr[k_pr]
+            p, r = CSCWorkbench.preprocessPRCurveDatas(pr).T
+            approx_fun = interp1d(r, p, kind="previous")
+            approx = approx_fun(recall_axis)
+            all_approx[k_pr] = approx
+            #CSCWorkbench.plotPRCurve(pr, ax=ax, color="b", alpha=0.2)
+
+        prec_mean = all_approx.mean(0)
+        prec_std = all_approx.std(0)
+        prec_mean_plus_std = prec_mean + prec_std
+        prec_mean_minus_std = prec_mean - prec_std
+
+        pr_mean = np.c_[prec_mean, recall_axis]
+        pr_mean_plus_std = np.c_[prec_mean_plus_std, recall_axis]
+        pr_mean_minus_std = np.c_[prec_mean_minus_std, recall_axis]
+
+        return pr_mean, pr_mean_plus_std, pr_mean_minus_std
+
+    def displayPRCurve(self, mmpdf_dict: dict, max_branches: int = 10, max_sparsity: int = 10, verbose:bool=False) :
+        """
+        Display the precision-recall curve for the given MMP-DF results.
+        
+        Args:
+            mmpdf_dict (dict): The MMP-DF dictionary.
+            max_branches (int): The maximum number of branches to consider.
+            max_sparsity (int): The maximum sparsity level to consider.
+        """
+        # Step 1: Extract precision-recall data as DataFrame
+        pr_df = self.extractPRCurveData(mmpdf_dict, max_branches, max_sparsity)
+
+        # Step 2: Convert DataFrame to numpy array
+        pr_array = pr_df[['precision', 'recall']].values
+
+        # Step 3: Plot the precision-recall curve
+        ax = CSCWorkbench.plotPRCurve(pr_array)
+        plt.show()
+
+    def displayPRCurveFromId(self, mmpdf_db_path:str, id:int, verbose:bool=False) :
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmpdf_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+
+        self.displayPRCurve(mmpdf_dict, verbose=verbose)
+
+    def computePRCurvesFromSparsity(self, mmpdf_db_path:str, sparsity:int, verbose:bool=False) :
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_results = output_data['mmp']
+
+        max_branches = 10
+        max_sparsity = 10
+
+        all_pr = []
+
+        for mmp_dict in mmp_results :
+            if mmp_dict['sparsity'] == sparsity :
+                pr_df = self.extractPRCurveData(mmp_dict, max_branches, max_sparsity, verbose=verbose)
+                pr_array = pr_df[['precision', 'recall']].values
+                all_pr.append(pr_array)
+
+        return all_pr
+
+    def displayMeanPRCurveFromSparsity(self, mmpdf_db_path:str, sparsity:int, verbose:bool=False) :
+        
+        all_pr = self.computePRCurvesFromSparsity(mmpdf_db_path, sparsity)
+
+        fig, ax = plt.subplots()
+        pr_mean, pr_mean_plus_std, pr_mean_minus_std = self.computeMeanPRCurve(all_pr, n_samples=1000, verbose=verbose)
+
+        CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color="k", alpha=1)
+        CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color="r", alpha=0.5)
+        CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color="r", alpha=0.5)
+
 

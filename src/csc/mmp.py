@@ -3,6 +3,7 @@ import uuid
 from tqdm import tqdm
 from numba import njit, jit
 import numpy as np
+import pandas as pd
 import networkx as nx
 from einops import rearrange
 from functools import partial
@@ -491,3 +492,128 @@ class MMPTree() :
             mmp_tree_dict[str_path]['atoms'] = leaf.getFullBranchAtoms()
             mmp_tree_dict[str_path]['delay'] = leaf.getMMPDFComputeTime()
         return mmp_tree_dict
+    
+    @staticmethod
+    def getTreeParamsFromMMPTreeDict(mmp_tree_dict:dict) -> Tuple[int, int]:
+        """
+        Get the sparsity and the connections from the MMPTree dictionary.
+        """
+        mmp_paths = mmp_tree_dict.keys()
+        sparsity = len(list(mmp_paths)[0].split('-'))
+        connections = max([max([int(layer_order) for layer_order in p.split('-')]) for p in mmp_paths])
+        return sparsity, connections
+    
+    @staticmethod
+    def shrinkMMPTreeDict(mmp_tree_dict:dict, max_branches:int) :
+        """
+        Shrink the MMPTree dictionary to a maximum number of branches.
+        Args:
+            mmp_tree_dict (dict): The MMPTree dictionary
+            max_branches (int): The maximum number of branches
+        Returns:
+            mmp_tree_dict (dict): The shrunk MMPTree dictionary
+        """
+        tree_sparsity, tree_connections = MMPTree.getTreeParamsFromMMPTreeDict(mmp_tree_dict)
+        for path, leaf_dict in mmp_tree_dict.items() :
+            branch_number = MMPTree.getCandidateNumber(tree_sparsity, tree_connections, list(map(int, path.split('-'))))
+            if branch_number > max_branches :
+                del mmp_tree_dict[path]
+        return mmp_tree_dict
+
+    @staticmethod
+    def shrinkMMPTreeDict(mmp_tree_dict:dict, max_branches:int):
+        """
+        Shrink the MMPTree dictionary to a maximum number of branches.
+        Args:
+            mmp_tree_dict (dict): The MMPTree dictionary
+            max_branches (int): The maximum number of branches
+        Returns:
+            mmp_tree_dict (dict): The shrunk MMPTree dictionary
+        """
+        tree_sparsity, tree_connections = MMPTree.getTreeParamsFromMMPTreeDict(mmp_tree_dict)
+        keys_to_delete = []  # Initialize a list to hold the keys to be deleted
+        for path, leaf_dict in mmp_tree_dict.items():
+            branch_number = MMPTree.getCandidateNumber(tree_sparsity, tree_connections, list(map(int, path.split('-'))))
+            if branch_number > max_branches:
+                keys_to_delete.append(path)  # Add the key to the list if the branch number is too high
+
+        # Delete the collected keys from the dictionary after the iteration
+        for key in keys_to_delete:
+            del mmp_tree_dict[key]
+
+        return mmp_tree_dict
+
+    @staticmethod
+    def getDataframeFromMMPTreeDict(mmp_tree_dict:dict) :
+        """
+        Build a DataFrame from the MMPTree dictionary.
+        Args:
+            mmp_tree_dict (dict): The MMPTree dictionary
+        Returns:
+            mmp_tree_df (pd.DataFrame): The MMPTree DataFrame
+            tree_sparsity (int): The sparsity of the tree
+            tree_connections (int): The number of connections in the tree
+        """
+        tree_sparsity, tree_connections = MMPTree.getTreeParamsFromMMPTreeDict(mmp_tree_dict)
+
+        # Initialize the MMPTree DataFrame
+        df_columns = ['branch_number', 'delay', 'mse']
+        df_columns.extend([f'atom-{i+1}' for i in range(tree_sparsity)])
+        df_columns.extend([f'layer-{i+1}' for i in range(tree_sparsity)])
+        mmp_tree_df = pd.DataFrame(columns=df_columns)
+        
+        # Iterate over the MMPTree branches
+        for i, (path_str, leaf_dict) in enumerate(mmp_tree_dict.items()) :
+            path = list(map(int, path_str.split('-')))
+            branch_number = MMPTree.getCandidateNumber(tree_sparsity, tree_connections, path)
+            delay = leaf_dict["delay"]
+            mse = leaf_dict["mse"]
+            atoms = leaf_dict["atoms"]
+            # Fill the MMPTree DataFrame
+            mmp_tree_df.loc[i] = [branch_number, delay, mse] + atoms + path
+
+        return mmp_tree_df
+
+    @staticmethod
+    def mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, signal, candidate_sparsity) :
+        """
+        Build a candidate from the MMPTree dictionary if the MMP algorithm has been run with candidate_sparsity.
+        Args:
+            mmp_tree_dict (dict): The MMPTree dictionary
+            signal (np.ndarray): The signal to approximate
+            candidate_sparsity (int): The sparsity of the candidate
+        Returns:
+            candidate_atoms (list): The candidate atoms
+        """
+        tree_sparsity, tree_connections = MMPTree.getTreeParamsFromMMPTreeDict(mmp_tree_dict)
+        mmp_tree_df = MMPTree.getDataframeFromMMPTreeDict(mmp_tree_dict)
+
+        if candidate_sparsity < tree_sparsity :
+            # Suppression des colonnes au-delà de la sparsité candidate
+            for i in range(candidate_sparsity + 1, tree_sparsity + 1) :
+                mmp_tree_df = mmp_tree_df.drop(f'layer-{i}', axis=1)
+
+            # Créer une liste des colonnes à utiliser pour identifier les duplicatas
+            columns_to_check = [f'layer-{i}' for i in range(1, candidate_sparsity + 1)]
+            
+            # Supprimer les duplicatas basés uniquement sur ces colonnes
+            mmp_tree_df = mmp_tree_df.drop_duplicates(subset=columns_to_check)
+
+            max_sparsity = candidate_sparsity
+
+        else :
+            max_sparsity = tree_sparsity
+
+        # Iterate over the rows of the MMPTree DataFrame
+        dict_candidates = {}
+        for _, row in mmp_tree_df.iterrows():
+            # Iterate over the columns "atom-i" to get the atoms
+            candidate_atoms = [value for i in range(1, max_sparsity + 1) for key, value in row.items() if key.startswith(f'atom-{i}')]
+            atom_signals = [ZSAtom.from_dict(atom).getAtomInSignal(signal_length=len(signal), offset=atom['x']) for atom in candidate_atoms]
+            candidate_approx = sum(atom_signals)
+            candidate_mse = np.mean((signal - candidate_approx) ** 2)
+            dict_candidates[candidate_mse] = candidate_atoms
+        
+        min_mse = min(dict_candidates.keys())
+        argmin_mse = dict_candidates[min_mse]
+        return argmin_mse
