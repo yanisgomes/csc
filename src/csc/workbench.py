@@ -2527,20 +2527,16 @@ class CSCWorkbench:
 
         # MMP-DF
         for sparsity, arrays in mmpdf_all_pr_dict.items():
-            if verbose :
-                print(f'MMP-DF: sparsity={sparsity} : {len(arrays)} x {arrays[0].shape}')
             for signal_prc in arrays :
                 mmpdf_prc.append(signal_prc)
 
         # OMP
         for sparsity, arrays in omp_all_pr_dict.items():
-            if verbose :
-                print(f'MMP-DF: sparsity={sparsity} : {len(arrays)} x {arrays[0].shape}')
             for signal_prc in arrays :
                 omp_prc.append(signal_prc)
 
-        mmpdf_pr_mean, mmpdf_pr_mean_plus_std, mmpdf_pr_mean_minus_std = workbench.computeMeanPRCurve(mmpdf_prc, n_samples=1000)
-        omp_pr_mean, omp_pr_mean_plus_std, omp_pr_mean_minus_std = workbench.computeMeanPRCurve(omp_prc, n_samples=1000)
+        mmpdf_pr_mean, mmpdf_pr_mean_plus_std, mmpdf_pr_mean_minus_std = self.computeMeanPRCurve(mmpdf_prc, n_samples=1000)
+        omp_pr_mean, omp_pr_mean_plus_std, omp_pr_mean_minus_std = self.computeMeanPRCurve(omp_prc, n_samples=1000)
 
         fig, ax = plt.subplots()
 
