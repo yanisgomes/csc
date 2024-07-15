@@ -817,7 +817,6 @@ class ZSDictionary() :
         
         return list_best_lmbda, list_best_mse
 
-        
     def alphaCSCPipeline(self, db_filename, verbose:bool=False) :
         """
         Create a pipeline of alphaCSC l1-algorithm from the database of signals.

@@ -2007,77 +2007,53 @@ class CSCWorkbench:
             aspect="equal",
         )
         return ax
-
-    def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
+    
+    def computeTPFPFNMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
         """
-        Compute the precison-recall metrics for the given true and approx atoms.
+        Compute the True Positive, False Positive and False Negative for the given true and approx atoms.
         """
         # Get the number of true and approx atoms
-        nb_true_atoms = len(true_atoms)
+        
         nb_approx_atoms = len(approx_atoms)
+        nb_true_atoms = len(true_atoms)
+        #true_atoms = true_atoms[:nb_approx_atoms]
 
         # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
-        matched_atoms = self.computeMatchingPosition(true_atoms[:nb_approx_atoms], approx_atoms)
-
+        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
 
         # Compute the True Positive, False Positive and False Negative
         position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
         tp = sum(1 for error in position_errors if error <= position_error_threshold)
 
         # False Positives
-        fp = nb_true_atoms - tp  
-        fp += sparsity - nb_approx_atoms
+        fp = len(approx_atoms) - tp  
+        fp += sparsity - len(approx_atoms)
 
         # False Negatives
         fn = nb_true_atoms - tp
 
-        # Calculate Precision and Recall
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-
         if verbose :
-            print(f't({nb_true_atoms})  | a({nb_approx_atoms})  |  P : {precision}  | R : {recall} \n')
+            print(f'Sparsity = {sparsity} | Position Error Threshold = {position_error_threshold}')
             for match in matched_atoms :
                 print(f'    t : {match[0]["x"]}  |  a : {match[1]["x"]}  ==> {bool(abs(match[0]["x"] - match[1]["x"]) <= position_error_threshold)}')
             print(f'    ==> TP : {tp}  |  FP : {fp}  |  FN : {fn} \n')
             print('\n')
 
+        return tp, fp, fn
+
+    def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
+        """
+        Compute the precision-recall metrics for the given true and approx atoms.
+        """
+        tp, fp, fn = self.computeTPFPFNMetrics(true_atoms, approx_atoms, sparsity, position_error_threshold=position_error_threshold, verbose=verbose)
+
+        # Calculate Precision and Recall
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+
         return precision, recall
     
-    def extractPRCurveData(self, mmpdf_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> pd.DataFrame:
-        """
-        Process the MMP-DF results.
-        Args :
-            mmpdf_dict (dict) : The MMP-DF dictionary.
-            signal (np.ndarray) : The signal.
-            max_branches (int) : The maximum number of branches to consider.
-            max_sparsity (int) : The maximum sparsity level to consider.
-        Returns :
-            pd.DataFrame : The precision-recall dataframe.
-        """
-        # Retrieve the tree structure to the max number of branches
-        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches)
-        
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
-        signal = signal_dict['signal']
-        true_atoms = signal_dict['atoms']
-
-        # Initialize the precion-recall dataframe
-        precisions = []
-        recalls = []
-
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, signal, candidate_sparsity=candidate_sparsity)
-            precison, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
-            precisions.append(precison)
-            recalls.append(recall)
-
-        precision_recall_df = pd.DataFrame({'sparsity': sparsity_levels, 'precision': precisions, 'recall': recalls})
-        return precision_recall_df
-
+    @staticmethod
     def computeMeanPRCurve(all_pr, n_samples):
         """
         Computes the mean Precision-Recall (PR) curve along with the curves
@@ -2135,6 +2111,108 @@ class CSCWorkbench:
 
         return pr_mean, pr_mean_plus_std, pr_mean_minus_std
 
+    def extractPRCurveData_MMPDF(self, mmpdf_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> pd.DataFrame:
+        """
+        Process the MMP-DF results.
+        Args :
+            mmpdf_dict (dict) : The MMP-DF dictionary.
+            signal (np.ndarray) : The signal.
+            max_branches (int) : The maximum number of branches to consider.
+            max_sparsity (int) : The maximum sparsity level to consider.
+        Returns :
+            pd.DataFrame : The precision-recall dataframe.
+        """
+        # Retrieve the tree structure to the max number of branches
+        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches)
+        
+        # Retrieve the signal from the datas
+        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
+        signal = signal_dict['signal']
+        true_atoms = signal_dict['atoms']
+
+        # Initialize the precion-recall dataframe
+        precisions = []
+        recalls = []
+
+        # Iterate over the attended sparsity levels
+        sparsity_levels = [i+1 for i in range(max_sparsity)]
+        for candidate_sparsity in sparsity_levels :
+            candidate_atoms = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, signal, candidate_sparsity=candidate_sparsity)
+            precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
+            precisions.append(precision)
+            recalls.append(recall)
+
+        precision_recall_df = pd.DataFrame({'sparsity': sparsity_levels, 'precision': precisions, 'recall': recalls})
+        return precision_recall_df
+    
+    def extractPRCurveData_OMP(self, mmpdf_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> pd.DataFrame:
+        """
+        Process the MMP-DF results.
+        Args :
+            mmpdf_dict (dict) : The MMP-DF dictionary.
+            signal (np.ndarray) : The signal.
+            max_branches (int) : The maximum number of branches to consider.
+            max_sparsity (int) : The maximum sparsity level to consider.
+        Returns :
+            pd.DataFrame : The precision-recall dataframe.
+        """
+        # Retrieve the tree structure to the max number of branches
+        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches)
+        
+        # Retrieve the signal from the datas
+        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
+        signal = signal_dict['signal']
+        true_atoms = signal_dict['atoms']
+
+        # Initialize the precion-recall dataframe
+        precisions = []
+        recalls = []
+
+        # Iterate over the attended sparsity levels
+        sparsity_levels = [i+1 for i in range(max_sparsity)]
+        for candidate_sparsity in sparsity_levels :
+            candidate_atoms = MMPTree.ompCandidateFromMMPTreeDict(mmp_tree_dict, signal, candidate_sparsity=candidate_sparsity)
+            precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
+            precisions.append(precision)
+            recalls.append(recall)
+
+        precision_recall_df = pd.DataFrame({'sparsity': sparsity_levels, 'precision': precisions, 'recall': recalls})
+        return precision_recall_df
+
+    def extractPRCurveData_MP(self, mp_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> pd.DataFrame:
+        """
+        Process the MMP-DF results.
+        Args :
+            mp_dict (dict) : The MMP-DF dictionary.
+            signal (np.ndarray) : The signal.
+            max_branches (int) : The maximum number of branches to consider.
+            max_sparsity (int) : The maximum sparsity level to consider.
+        Returns :
+            pd.DataFrame : The precision-recall dataframe.
+        """
+        # Retrieve the atoms from the MP algorithm output
+        approx_atoms = mp_dict['atoms']
+
+        # Retrieve the signal from the datas
+        signal_dict = self.signalDictFromId(mp_dict['id'])
+        signal = signal_dict['signal']
+        true_atoms = signal_dict['atoms']
+
+        # Initialize the precion-recall dataframe
+        precisions = []
+        recalls = []
+
+        # Iterate over the attended sparsity levels
+        sparsity_levels = [i+1 for i in range(max_sparsity)]
+        for candidate_sparsity in sparsity_levels :
+            candidate_atoms = approx_atoms[:min(candidate_sparsity, len(approx_atoms))]
+            precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
+            precisions.append(precision)
+            recalls.append(recall)
+
+        precision_recall_df = pd.DataFrame({'sparsity': sparsity_levels, 'precision': precisions, 'recall': recalls})
+        return precision_recall_df
+
     def displayPRCurve(self, mmpdf_dict: dict, max_branches: int = 10, max_sparsity: int = 10, verbose:bool=False) :
         """
         Display the precision-recall curve for the given MMP-DF results.
@@ -2145,7 +2223,7 @@ class CSCWorkbench:
             max_sparsity (int): The maximum sparsity level to consider.
         """
         # Step 1: Extract precision-recall data as DataFrame
-        pr_df = self.extractPRCurveData(mmpdf_dict, max_branches, max_sparsity)
+        pr_df = self.extractPRCurveData_MMPDF(mmpdf_dict, max_branches, max_sparsity, verbose=verbose)
 
         # Step 2: Convert DataFrame to numpy array
         pr_array = pr_df[['precision', 'recall']].values
@@ -2154,13 +2232,88 @@ class CSCWorkbench:
         ax = CSCWorkbench.plotPRCurve(pr_array)
         plt.show()
 
-    def displayPRCurveFromId(self, mmpdf_db_path:str, id:int, verbose:bool=False) :
+    def displayPRCurveFromId(self, mmpdf_db_path:str, id:int, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) :
         # Load the data
         with open(mmpdf_db_path, 'r') as f:
             output_data = json.load(f)
             mmpdf_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
 
-        self.displayPRCurve(mmpdf_dict, verbose=verbose)
+        self.displayPRCurve(mmpdf_dict, max_branches=max_branches, max_sparsity=max_sparsity, verbose=verbose)
+
+    def displayPRCDecomposition(self, mmpdf_db_path:str, id:int, verbose:bool=False) :
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmpdf_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+
+        max_branches = 20
+        max_sparsity = 20
+
+        # Step 1: Extract precision-recall data as DataFrame
+        pr_df = self.extractPRCurveData_MMPDF(mmpdf_dict, max_branches, max_sparsity)
+
+        # Retrieve the tree structure to the max number of branches
+        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches)
+        
+        # Retrieve the signal from the datas
+        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
+        signal = signal_dict['signal']
+        true_atoms = signal_dict['atoms']
+
+        # Iterate over the attended sparsity levels
+        sparsity_levels = [i+1 for i in range(max_sparsity)]
+
+        fig, axs = plt.subplots(len(sparsity_levels), 2, figsize=(15, 4*len(sparsity_levels)),
+                            gridspec_kw={'width_ratios': [3, 1]}, sharex='col')
+        
+        for i, candidate_sparsity in enumerate(sparsity_levels) :
+
+            # Extract the candidate atoms
+            candidate_atoms = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, signal, candidate_sparsity=candidate_sparsity)
+
+            # Plot the noisy signal
+            axs[i, 0].plot(signal, label='Noisy signal', color='k', alpha=0.4, lw=3)
+
+            matched_atoms = self.computeMatchingPosition(true_atoms, candidate_atoms)
+            
+            alphas = [0.4]*len(matched_atoms)
+            alphas[-1] = 1
+
+            for j, (true_atom, cand_atom) in enumerate(matched_atoms) : 
+                # Plot the true atoms
+                t_atom = ZSAtom.from_dict(true_atom)
+                t_atom.padBothSides(self.dictionary.getAtomsLength())
+                t_atom_signal = t_atom.getAtomInSignal(len(signal), true_atom['x'])
+                axs[i, 0].plot(t_atom_signal, label=f'True atom n°{j+1} at x={true_atom["x"]}', lw=1, color='g', alpha=alphas[j])
+                # Plot the cand atoms
+                c_atom = ZSAtom.from_dict(cand_atom)
+                c_atom.padBothSides(self.dictionary.getAtomsLength())
+                c_atom_signal = c_atom.getAtomInSignal(len(signal), cand_atom['x'])
+                axs[i, 0].plot(c_atom_signal, label=f'Cand atom n°{j+1} at x={cand_atom["x"]}', lw=1, color='b', alpha=alphas[j])
+
+            # Compute the precision and the recall with the TP, FP, FN Metrics
+            tp, fp, fn = self.computeTPFPFNMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+
+            axs[i, 0].set_title(f'Step n°{i} : sparsity {candidate_sparsity} ==> Number of atoms : {len(matched_atoms)}', fontsize=14)
+            axs[i, 0].legend(loc='best')
+            axs[i, 0].axis('off')
+
+            # Displaying TP, FP, FN in a table on the right axis
+            colLabels = ["TP", "FP", "FN"]
+            rowLabels = ["Value"]
+            table_data = [[tp, fp, fn]]
+            table = axs[i, 1].table(cellText=table_data, colLabels=colLabels, rowLabels=rowLabels, loc='center', cellLoc='center')
+            table.auto_set_font_size(False)
+            table.set_fontsize(10)
+            table.scale(1, 2)
+
+            axs[i, 1].set_title(f'Precision = {round(precision, 2)} ; Recall = {round(recall, 2)}', fontsize=14)
+            axs[i, 1].axis('off')
+
+        plt.tight_layout()
+        plt.show()
 
     def computePRCurvesFromSparsity(self, mmpdf_db_path:str, sparsity:int, verbose:bool=False) :
         # Load the data
@@ -2175,7 +2328,7 @@ class CSCWorkbench:
 
         for mmp_dict in mmp_results :
             if mmp_dict['sparsity'] == sparsity :
-                pr_df = self.extractPRCurveData(mmp_dict, max_branches, max_sparsity, verbose=verbose)
+                pr_df = self.extractPRCurveData_MMPDF(mmp_dict, max_branches, max_sparsity, verbose=verbose)
                 pr_array = pr_df[['precision', 'recall']].values
                 all_pr.append(pr_array)
 
@@ -2191,5 +2344,3 @@ class CSCWorkbench:
         CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color="k", alpha=1)
         CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color="r", alpha=0.5)
         CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color="r", alpha=0.5)
-
-
