@@ -2053,6 +2053,26 @@ class CSCWorkbench:
 
         return precision, recall
     
+    def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
+        """
+        Compute the precision-recall metrics for the given true and approx atoms.
+        """
+        # Get the number of true and approx atoms
+        nb_approx_atoms = len(approx_atoms)
+        nb_true_atoms = len(true_atoms)
+
+        # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
+        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
+
+        # Compute the True Positive, False Positive and False Negative
+        position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
+        tp = sum(1 for error in position_errors if error <= position_error_threshold)
+
+        precision = tp / sparsity
+        recall = tp / nb_true_atoms
+
+        return precision, recall
+
     @staticmethod
     def computeMeanPRCurve(all_pr, n_samples):
         """
@@ -2213,7 +2233,7 @@ class CSCWorkbench:
         precision_recall_df = pd.DataFrame({'sparsity': sparsity_levels, 'precision': precisions, 'recall': recalls})
         return precision_recall_df
 
-    def displayPRCurve(self, mmpdf_dict: dict, max_branches: int = 10, max_sparsity: int = 10, verbose:bool=False) :
+    def displayPRCurve_MMPDF(self, mmpdf_dict: dict, max_branches: int = 10, max_sparsity: int = 10, verbose:bool=False) :
         """
         Display the precision-recall curve for the given MMP-DF results.
         
@@ -2232,13 +2252,42 @@ class CSCWorkbench:
         ax = CSCWorkbench.plotPRCurve(pr_array)
         plt.show()
 
-    def displayPRCurveFromId(self, mmpdf_db_path:str, id:int, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) :
+    def displayPRCurveFromId_MMPDF(self, mmpdf_db_path:str, id:int, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) :
         # Load the data
         with open(mmpdf_db_path, 'r') as f:
             output_data = json.load(f)
             mmpdf_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
 
-        self.displayPRCurve(mmpdf_dict, max_branches=max_branches, max_sparsity=max_sparsity, verbose=verbose)
+        self.displayPRCurve_MMPDF(mmpdf_dict, max_branches=max_branches, max_sparsity=max_sparsity, verbose=verbose)
+
+    def displayPRCurveComparisonFromId(self, mmpdf_db_path:str, mp_db_path:str, id:int, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) :
+        # Load the MMP-DF data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmpdf_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+        
+        # Load the MP data
+        with open(mp_db_path, 'r') as f:
+            output_data = json.load(f)
+            mp_dict = next((result for result in output_data['mp'] if result['id'] == id), None)
+
+        # Step 1: Extract precision-recall data as DataFrame
+        mmpdf_pr_df = self.extractPRCurveData_MMPDF(mmpdf_dict, max_branches, max_sparsity, verbose=verbose)
+        omp_pr_df = self.extractPRCurveData_OMP(mmpdf_dict, max_branches, max_sparsity, verbose=verbose)
+        mp_pr_df = self.extractPRCurveData_MP(mp_dict, max_branches, max_sparsity, verbose=verbose)
+        
+        # Step 2: Convert DataFrame to numpy array
+        mmpdf_pr_array = mmpdf_pr_df[['precision', 'recall']].values
+        omp_pr_array = omp_pr_df[['precision', 'recall']].values
+        mp_pr_array = mp_pr_df[['precision', 'recall']].values
+
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+        CSCWorkbench.plotPRCurve(mmpdf_pr_array, ax=ax, label='MMP-DF')
+        CSCWorkbench.plotPRCurve(omp_pr_array, ax=ax, label='OMP')
+        CSCWorkbench.plotPRCurve(mp_pr_array, ax=ax, label='MP')
+        plt.title(f'Precision-Recall Curve for signal n°{id}')
+        plt.legend(loc='best')
+        plt.show()
 
     def displayPRCDecomposition(self, mmpdf_db_path:str, id:int, verbose:bool=False) :
         # Load the data
@@ -2344,3 +2393,167 @@ class CSCWorkbench:
         CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color="k", alpha=1)
         CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color="r", alpha=0.5)
         CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color="r", alpha=0.5)
+
+    def computePRCurves_MMPDF(self, mmpdf_db_path:str, max_branches:int, max_sparsity:int, verbose:bool=False) :
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_results = output_data['mmp']
+
+            all_pr_dict = {}
+
+            for sparsity in output_data['sparsityLevels'] :
+                all_pr_dict[sparsity] = list()
+
+        for mmp_dict in mmp_results :
+            pr_df = self.extractPRCurveData_MMPDF(mmp_dict, max_branches, max_sparsity, verbose=verbose)
+            pr_array = pr_df[['precision', 'recall']].values
+            all_pr_dict[mmp_dict['sparsity']].append(pr_array)
+
+        return all_pr_dict
+    
+    def computePRCurves_OMP(self, mmpdf_db_path:str, max_branches:int, max_sparsity:int, verbose:bool=False) :
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_results = output_data['mmp']
+
+            all_pr_dict = {}
+
+            for sparsity in output_data['sparsityLevels'] :
+                all_pr_dict[sparsity] = list()
+
+
+        for mmp_dict in mmp_results :
+            pr_df = self.extractPRCurveData_OMP(mmp_dict, max_branches, max_sparsity, verbose=verbose)
+            pr_array = pr_df[['precision', 'recall']].values
+            all_pr_dict[mmp_dict['sparsity']].append(pr_array)
+
+        return all_pr_dict
+
+    def computePRCurves_MP(self, mp_db_path:str, max_branches:int, max_sparsity:int, verbose:bool=False) :
+        # Load the data
+        with open(mp_db_path, 'r') as f:
+            output_data = json.load(f)
+            mp_results = output_data['mp']
+
+            all_pr_dict = {}
+
+            for sparsity in output_data['sparsityLevels'] :
+                all_pr_dict[sparsity] = list()
+
+        for mp_dict in mp_results :
+            pr_df = self.extractPRCurveData_MP(mp_dict, max_branches, max_sparsity, verbose=verbose)
+            pr_array = pr_df[['precision', 'recall']].values
+            all_pr_dict[mp_dict['sparsity']].append(pr_array)
+
+        return all_pr_dict
+    
+    def computeMeanPRCComparisonFromId(self, mmpdf_db_path:str, mp_db_path:str, id:int, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) :
+
+        # Load the MMP-DF data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmpdf_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+        
+        # Load the MP data
+        with open(mp_db_path, 'r') as f:
+            output_data = json.load(f)
+            mp_dict = next((result for result in output_data['mp'] if result['id'] == id), None)
+
+        # Step 1: Extract precision-recall data as DataFrame
+        mmpdf_pr_df = self.extractPRCurveData_MMPDF(mmpdf_dict, max_branches, max_sparsity, verbose=verbose)
+        omp_pr_df = self.extractPRCurveData_OMP(mmpdf_dict, max_branches, max_sparsity, verbose=verbose)
+        mp_pr_df = self.extractPRCurveData_MP(mp_dict, max_branches, max_sparsity, verbose=verbose)
+        
+        # Step 2: Convert DataFrame to numpy array
+        mmpdf_pr_array = mmpdf_pr_df[['precision', 'recall']].values
+        omp_pr_array = omp_pr_df[['precision', 'recall']].values
+        mp_pr_array = mp_pr_df[['precision', 'recall']].values
+
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+        CSCWorkbench.plotPRCurve(mmpdf_pr_array, ax=ax, label='MMP-DF')
+        CSCWorkbench.plotPRCurve(omp_pr_array, ax=ax, label='OMP')
+        CSCWorkbench.plotPRCurve(mp_pr_array, ax=ax, label='MP')
+        plt.title(f'Precision-Recall Curve for signal n°{id}')
+        plt.legend(loc='best')
+        plt.show()
+
+    def displayMeanPRC(self, mmpdf_db_path:str, mp_db_path:str, max_branches:int=10, max_sparsity:int=50, verbose:bool=False) :
+
+        mmpdf_all_pr_dict = self.computePRCurves_MMPDF(mmpdf_db_path, max_branches=max_branches, max_sparsity=max_sparsity)
+        omp_all_pr_dict = self.computePRCurves_OMP(mmpdf_db_path, max_branches=10, max_sparsity=max_sparsity)
+
+        mmpdf_prc = list()
+        omp_prc = list()
+
+        # MMP-DF
+        for sparsity, arrays in mmpdf_all_pr_dict.items():
+            if verbose :
+                print(f'MMP-DF: sparsity={sparsity} : {len(arrays)} x {arrays[0].shape}')
+            for signal_prc in arrays :
+                mmpdf_prc.append(signal_prc)
+
+        # OMP
+        for sparsity, arrays in omp_all_pr_dict.items():
+            if verbose :
+                print(f'MMP-DF: sparsity={sparsity} : {len(arrays)} x {arrays[0].shape}')
+            for signal_prc in arrays :
+                omp_prc.append(signal_prc)
+
+        mmpdf_pr_mean, mmpdf_pr_mean_plus_std, mmpdf_pr_mean_minus_std = workbench.computeMeanPRCurve(mmpdf_prc, n_samples=1000)
+        omp_pr_mean, omp_pr_mean_plus_std, omp_pr_mean_minus_std = workbench.computeMeanPRCurve(omp_prc, n_samples=1000)
+
+        fig, ax = plt.subplots()
+
+        # Plot mean MMP-DF curve
+        CSCWorkbench.plotPRCurve(mmpdf_pr_mean, ax=ax, color="C1", label="MMP-DF", alpha=1)
+        CSCWorkbench.plotPRCurve(mmpdf_pr_mean_plus_std, ax=ax, color="C1", alpha=0.5)
+        CSCWorkbench.plotPRCurve(mmpdf_pr_mean_minus_std, ax=ax, color="C1", alpha=0.5)
+
+        # Plot mean OMP curve
+        CSCWorkbench.plotPRCurve(omp_pr_mean, ax=ax, color="b", label="OMP", alpha=1)
+        CSCWorkbench.plotPRCurve(omp_pr_mean_plus_std, ax=ax, color="b", alpha=0.5)
+        CSCWorkbench.plotPRCurve(omp_pr_mean_minus_std, ax=ax, color="b", alpha=0.5)
+
+        plt.title('Precision-Recall curves for OMP and MMP-DF')
+        plt.legend(loc='best')
+        plt.show()
+
+    def displayMeanPRCFromDict(self, mmpdf_all_pr_dict:dict, omp_all_pr_dict:dict, max_branches:int=10, max_sparsity:int=50, verbose:bool=False) :
+
+        mmpdf_prc = list()
+        omp_prc = list()
+
+        # MMP-DF
+        for sparsity, arrays in mmpdf_all_pr_dict.items():
+            if verbose :
+                print(f'MMP-DF: sparsity={sparsity} : {len(arrays)} x {arrays[0].shape}')
+            for signal_prc in arrays :
+                mmpdf_prc.append(signal_prc)
+
+        # OMP
+        for sparsity, arrays in omp_all_pr_dict.items():
+            if verbose :
+                print(f'MMP-DF: sparsity={sparsity} : {len(arrays)} x {arrays[0].shape}')
+            for signal_prc in arrays :
+                omp_prc.append(signal_prc)
+
+        mmpdf_pr_mean, mmpdf_pr_mean_plus_std, mmpdf_pr_mean_minus_std = workbench.computeMeanPRCurve(mmpdf_prc, n_samples=1000)
+        omp_pr_mean, omp_pr_mean_plus_std, omp_pr_mean_minus_std = workbench.computeMeanPRCurve(omp_prc, n_samples=1000)
+
+        fig, ax = plt.subplots()
+
+        # Plot mean MMP-DF curve
+        CSCWorkbench.plotPRCurve(mmpdf_pr_mean, ax=ax, color="C1", label="MMP-DF", alpha=1)
+        CSCWorkbench.plotPRCurve(mmpdf_pr_mean_plus_std, ax=ax, color="C1", alpha=0.5)
+        CSCWorkbench.plotPRCurve(mmpdf_pr_mean_minus_std, ax=ax, color="C1", alpha=0.5)
+
+        # Plot mean OMP curve
+        CSCWorkbench.plotPRCurve(omp_pr_mean, ax=ax, color="b", label="OMP", alpha=1)
+        CSCWorkbench.plotPRCurve(omp_pr_mean_plus_std, ax=ax, color="b", alpha=0.5)
+        CSCWorkbench.plotPRCurve(omp_pr_mean_minus_std, ax=ax, color="b", alpha=0.5)
+
+        plt.title('Precision-Recall curves for OMP and MMP-DF')
+        plt.legend(loc='best')
+        plt.show()

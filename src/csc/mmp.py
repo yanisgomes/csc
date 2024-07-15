@@ -542,6 +542,25 @@ class MMPTree() :
             del mmp_tree_dict[key]
 
         return mmp_tree_dict
+    
+    @staticmethod
+    def getSubTreeFromMMPTreeDict(mmp_tree_dict:dict, signal:np.ndarray, sparsity:int) -> dict :
+        """
+        Get a sub-tree from the MMPTree dictionary with a given sparsity.
+        """
+        tree_sparsity, tree_connections = MMPTree.getTreeParamsFromMMPTreeDict(mmp_tree_dict)
+        mmp_sub_tree_dict = {}
+        for path, leaf_dict in mmp_tree_dict.items() :
+            path_list = list(map(int, path.split('-')))
+            sub_path_list = path_list[:sparsity]
+            sub_path = '-'.join([str(p) for p in sub_path_list])
+            if sub_path not in mmp_sub_tree_dict.keys() :
+                sub_path_atoms = leaf_dict['atoms'][:sparsity]
+                sub_path_atoms_signals = [ZSAtom.from_dict(atom).getAtomInSignal(signal_length=len(signal), offset=atom['x']) for atom in sub_path_atoms]
+                sub_path_approx = sum(sub_path_atoms_signals)
+                sub_path_mse = np.mean((signal - sub_path_approx) ** 2)
+                mmp_sub_tree_dict[sub_path] = {'atoms':sub_path_atoms, 'mse':sub_path_mse}
+        return mmp_sub_tree_dict
 
     @staticmethod
     def getDataframeFromMMPTreeDict(mmp_tree_dict:dict) :
@@ -606,6 +625,7 @@ class MMPTree() :
 
         # Iterate over the rows of the MMPTree DataFrame
         dict_candidates = {}
+        dict_names_cand = {}
         for _, row in mmp_tree_df.iterrows():
             # Iterate over the columns "atom-i" to get the atoms
             candidate_atoms = [value for i in range(1, max_sparsity + 1) for key, value in row.items() if key.startswith(f'atom-{i}')]
@@ -613,11 +633,45 @@ class MMPTree() :
             candidate_approx = sum(atom_signals)
             candidate_mse = np.mean((signal - candidate_approx) ** 2)
             dict_candidates[candidate_mse] = candidate_atoms
+            dict_names_cand[candidate_mse] = row['branch_number']
         
         min_mse = min(dict_candidates.keys())
         argmin_mse = dict_candidates[min_mse]
-        return argmin_mse
 
+        print(dict_candidates)
+        print(f'{dict_names_cand[min_mse]} : MSE = {min_mse}')
+        return argmin_mse
+    
+    @staticmethod
+    def mmpdfCandidateFromMMPTreeDict(mmp_tree_dict:dict, signal:np.ndarray, candidate_sparsity:int) :
+        """
+        Build a candidate from the MMPTree dictionary if the MMP algorithm has been run with candidate_sparsity.
+        Args:
+            mmp_tree_dict (dict): The MMPTree dictionary
+            signal (np.ndarray): The signal to approximate
+            candidate_sparsity (int): The sparsity of the candidate
+        Returns:
+            candidate_atoms (list): The candidate atoms
+        """
+        tree_sparsity, tree_connections = MMPTree.getTreeParamsFromMMPTreeDict(mmp_tree_dict)
+
+        mmp_sub_tree_dict = MMPTree.getSubTreeFromMMPTreeDict(mmp_tree_dict, signal, candidate_sparsity)
+
+        max_sparsity = min(candidate_sparsity, tree_sparsity)
+        min_mse = np.inf
+        argmin_mse_branch = '-'.join(['1' for _ in range(max_sparsity)])
+
+        for path, leaf_dict in mmp_sub_tree_dict.items() :
+            if leaf_dict['mse'] < min_mse :
+                min_mse = leaf_dict['mse']
+                argmin_mse_branch = path
+
+        argmin_mse_atoms = mmp_sub_tree_dict[argmin_mse_branch]['atoms']
+        
+        print(f'MMP-DF : {argmin_mse_branch} MSE = {min_mse}')
+
+        return argmin_mse_atoms
+            
     @staticmethod
     def ompCandidateFromMMPTreeDict(mmp_tree_dict:dict, signal:np.ndarray, candidate_sparsity:int) :
         """
@@ -635,4 +689,13 @@ class MMPTree() :
         omp_branch_dict = mmp_tree_dict[omp_branch_name]
         omp_atoms = omp_branch_dict['atoms']
 
-        return omp_atoms[:min(candidate_sparsity, tree_sparsity)]
+        # Get the sub branch
+        omp_sub_branch_name = '-'.join(['1' for _ in range(min(candidate_sparsity, tree_sparsity))])
+        omp_sub_branch_atoms = omp_atoms[:min(candidate_sparsity, tree_sparsity)]
+
+        atom_signals = [ZSAtom.from_dict(atom).getAtomInSignal(signal_length=len(signal), offset=atom['x']) for atom in omp_sub_branch_atoms]
+        candidate_approx = sum(atom_signals)
+        candidate_mse = np.mean((signal - candidate_approx) ** 2)
+        print(f'OMP : {omp_sub_branch_name} MSE = {candidate_mse}')
+
+        return omp_sub_branch_atoms
