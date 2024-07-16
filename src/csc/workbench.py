@@ -557,7 +557,7 @@ class CSCWorkbench:
         axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
         axs[0].plot(omp_signal, label='OMP')
         axs[0].plot(mmp_signal, label='MMP')
-        axs[0].set_title('OMP MSE = {:.2e} & MMP {} MSE = {:.2e}'.format(omp_dict['mse'], mmp_path, mmp_dict['mse']), fontsize=12)
+        axs[0].set_title('OMP MSE = {} & MMP {} MSE = {}'.format(omp_dict['mse'], mmp_path, mmp_dict['mse']), fontsize=12)
         axs[0].legend(loc='best')
         axs[0].axis('off')
         plt.show()
@@ -2445,7 +2445,14 @@ class CSCWorkbench:
         for mp_dict in mp_results :
             pr_df = self.extractPRCurveData_MP(mp_dict, max_branches, max_sparsity, verbose=verbose)
             pr_array = pr_df[['precision', 'recall']].values
-            all_pr_dict[mp_dict['sparsity']].append(pr_array)
+            try :
+                all_pr_dict[mp_dict['sparsity']].append(pr_array)
+    
+            except KeyError :
+                # Unexplained error in csc-mp-200.json
+                # "id": 2165
+                # "sparsity": 2
+                pass
 
         return all_pr_dict
     

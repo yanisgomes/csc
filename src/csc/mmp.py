@@ -594,7 +594,7 @@ class MMPTree() :
         return mmp_tree_df
 
     @staticmethod
-    def mmpdfCandidateFromMMPTreeDict(mmp_tree_dict:dict, signal:np.ndarray, candidate_sparsity:int) :
+    def mmpdfCandidateFromMMPTreeDict(mmp_tree_dict:dict, signal:np.ndarray, candidate_sparsity:int, verbose:bool=False) :
         """
         Build a candidate from the MMPTree dictionary if the MMP algorithm has been run with candidate_sparsity.
         Args:
@@ -633,17 +633,19 @@ class MMPTree() :
             candidate_approx = sum(atom_signals)
             candidate_mse = np.mean((signal - candidate_approx) ** 2)
             dict_candidates[candidate_mse] = candidate_atoms
-            dict_names_cand[candidate_mse] = row['branch_number']
+            dict_names_cand[candidate_mse] = '-'.join([str(node) for node in MMPTree.getCandidatePath(sparsity=max_sparsity, connections=tree_connections, candidate_number=row['branch_number'])])
         
         min_mse = min(dict_candidates.keys())
         argmin_mse = dict_candidates[min_mse]
 
-        print(dict_candidates)
-        print(f'{dict_names_cand[min_mse]} : MSE = {min_mse}')
+        if verbose :
+            for mse, cand_name in dict_names_cand.items() :
+                print(f'{cand_name} : {mse}')
+            print(f'MMP-DF : {dict_names_cand[min_mse]} | MSE = {min_mse}')
         return argmin_mse
     
     @staticmethod
-    def mmpdfCandidateFromMMPTreeDict(mmp_tree_dict:dict, signal:np.ndarray, candidate_sparsity:int) :
+    def mmpdfCandidateFromMMPTreeDict2(mmp_tree_dict:dict, signal:np.ndarray, candidate_sparsity:int, verbose:bool=False) :
         """
         Build a candidate from the MMPTree dictionary if the MMP algorithm has been run with candidate_sparsity.
         Args:
@@ -668,12 +670,13 @@ class MMPTree() :
 
         argmin_mse_atoms = mmp_sub_tree_dict[argmin_mse_branch]['atoms']
         
-        print(f'MMP-DF : {argmin_mse_branch} MSE = {min_mse}')
+        if verbose :
+            print(f'MMP-DF : {argmin_mse_branch} |MSE = {min_mse}')
 
         return argmin_mse_atoms
             
     @staticmethod
-    def ompCandidateFromMMPTreeDict(mmp_tree_dict:dict, signal:np.ndarray, candidate_sparsity:int) :
+    def ompCandidateFromMMPTreeDict(mmp_tree_dict:dict, signal:np.ndarray, candidate_sparsity:int, verbose:bool=False) :
         """
         Build a candidate from the MMPTree dictionary if the OMP algorithm has been run with candidate_sparsity.
         Args:
@@ -696,6 +699,8 @@ class MMPTree() :
         atom_signals = [ZSAtom.from_dict(atom).getAtomInSignal(signal_length=len(signal), offset=atom['x']) for atom in omp_sub_branch_atoms]
         candidate_approx = sum(atom_signals)
         candidate_mse = np.mean((signal - candidate_approx) ** 2)
-        print(f'OMP : {omp_sub_branch_name} MSE = {candidate_mse}')
+
+        if verbose :
+            print(f'OMP : {omp_sub_branch_name} MSE = {candidate_mse}')
 
         return omp_sub_branch_atoms
