@@ -489,15 +489,16 @@ class CSCWorkbench:
             axs[i+1].plot(true_signal, color='g')
             axs[i+1].plot(approx, color=f'C{i}')
             axs[i+1].plot(signal_dict['signal'], color='k', alpha=0.4, lw=3)
-            axs[i+1].set_title('{} : MSE = {:.2e}'.format(results_name[i], result_dict["mse"]), fontsize=12)
+            axs[i+1].set_title('{} : MSE = {}'.format(results_name[i], result_dict["mse"]), fontsize=12)
             axs[0].legend(loc='best')
             axs[i+1].axis('off')  
             
         axs[0].legend(loc='best') 
         axs[0].axis('off')
+        plt.suptitle(f'OMP and MMP comparison on signal n°{id}', fontsize=14)
         plt.show()
 
-    def plotMMPDecomposition(self, db_path:str, id:int) -> None :
+    def plotMMPDecomposition(self, db_path:str, id:int, verbose:bool=True) -> None :
         """
         Plot the signal decomposition.
         Args:
@@ -527,6 +528,15 @@ class CSCWorkbench:
         # Extract the atoms from the dict
         omp_atoms_dict = omp_dict['atoms']
         mmp_atoms_dict = mmp_dict['atoms']
+
+        if verbose :
+            print(f'OMP atoms :')
+            for atom in omp_atoms_dict :
+                print(f'    {atom}')
+            print(f'MMP-DF {mmp_path} atoms :')
+            for atom in mmp_atoms_dict :
+                print(f'    {atom}')
+
         nb_atoms = len(omp_atoms_dict)
 
         fig, axs = plt.subplots(nb_atoms+1, 1, figsize=(12, (nb_atoms+1)*3), sharex=True)
@@ -553,7 +563,14 @@ class CSCWorkbench:
             axs[i+1].set_title(f'Step n°{i+1}', fontsize=12)
             axs[i+1].legend(loc='best')
             axs[i+1].axis('off')
-        
+
+        omp_mse = np.mean((signal_dict['signal'] - omp_signal)**2)
+        mmp_mse = np.mean((signal_dict['signal'] - mmp_signal)**2)
+
+        if verbose :
+            print(f'OMP MSE = {omp_mse}')
+            print(f'MMP {mmp_path} MSE = {mmp_mse}')
+
         axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
         axs[0].plot(omp_signal, label='OMP')
         axs[0].plot(mmp_signal, label='MMP')
@@ -2157,7 +2174,7 @@ class CSCWorkbench:
         # Iterate over the attended sparsity levels
         sparsity_levels = [i+1 for i in range(max_sparsity)]
         for candidate_sparsity in sparsity_levels :
-            candidate_atoms = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, signal, candidate_sparsity=candidate_sparsity)
+            candidate_atoms = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, self.dictionary.getAtomsLength(), signal, candidate_sparsity=candidate_sparsity)
             precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
             precisions.append(precision)
             recalls.append(recall)
@@ -2318,7 +2335,7 @@ class CSCWorkbench:
         for i, candidate_sparsity in enumerate(sparsity_levels) :
 
             # Extract the candidate atoms
-            candidate_atoms = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, signal, candidate_sparsity=candidate_sparsity)
+            candidate_atoms = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, self.dictionary.getAtomsLength(), signal, candidate_sparsity=candidate_sparsity)
 
             # Plot the noisy signal
             axs[i, 0].plot(signal, label='Noisy signal', color='k', alpha=0.4, lw=3)

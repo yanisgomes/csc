@@ -299,6 +299,51 @@ class ZSDictionary() :
         # Return the composition of the two operators
         return conv_operator @ mask_operator
     
+    def getActivationIdxFromAtom(self, atom:ZSAtom, offset:int) -> int:
+        """Return the index of the activation corresponding to the atom and the offset
+        Args:
+            atom (ZSAtom): The atom to find in the dictionary
+            offset (int): The offset of the atom in the signal
+        Returns:
+            int: The index of the activation corresponding to the atom and the offset
+        """
+        atom_idx = self.atoms.index(atom)
+        return offset*len(self.atoms) + atom_idx
+    
+    def getActivationIdxFromParams(self, params_dict:dict) -> int:
+        """Return the index of the activation corresponding to the atom parameters
+        Args:
+            params_dict (dict): The parameters of the atom to find in the dictionary
+        Returns:
+            int: The index of the activation corresponding to the atom parameters
+        """
+        atom = ZSAtom.from_dict(params_dict)
+        offset = params_dict['x']
+        return self.getActivationIdxFromAtom(atom, offset)
+    
+    def getSignalProjectionFromAtoms(self, signal:np.ndarray, atoms_dicts:List[dict]) -> np.ndarray:
+        """Project the activations on the dictionary
+        Args:
+            activations (np.ndarray): The activations of the signal
+        Returns:
+            np.ndarray: The projection of the activations on the dictionary
+        """
+        # Activation mask parameters 
+        signal_length = len(signal)
+        nb_valid_offset = signal_length - self.atoms_length + 1
+        nb_activations = nb_valid_offset * len(self.atoms)
+        activation_mask = np.zeros((nb_activations,), dtype=np.float64)
+        for atom_dict in atoms_dicts :
+            activation_idx = self.getActivationIdxFromParams(atom_dict)
+            activation_mask[activation_idx] = 1.0
+        # Compute the masked convolution operator
+        masked_conv_op = self.getMaskedConvOperator(activation_mask)
+        # Solve the LSQR system :
+        # Least Squares with QR decomposition
+        # A @ x = b with A = masked_conv_op, x = activations, b = signal
+        activations, *_ = lsqr(masked_conv_op, signal)
+        return masked_conv_op @ activations
+
     #               ______     __    __     ______  
     #              /\  __ \   /\ "-./  \   /\  == \ 
     #              \ \ \/\ \  \ \ \-./\ \  \ \  _-/ 

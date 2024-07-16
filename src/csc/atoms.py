@@ -76,6 +76,14 @@ class ZSAtom() :
     def __str__(self) -> str:
         return "b={:.3f}, y={:.3f}, sigma={:.3e}".format(self.params['b'], self.params['y'], self.params['sigma'])
 
+    def __eq__(self, other: object) -> bool:
+        """
+        Check if two ZSAtoms are equal according on the shape parameters
+        """
+        if not isinstance(other, ZSAtom):
+            return False
+        return ((self.params['b'] == other.params['b']) and (self.params['y'] == other.params['y']))
+    
     def __getitem__(self, key):
         return self.params.get(key, None)
     
