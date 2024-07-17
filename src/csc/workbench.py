@@ -2409,7 +2409,7 @@ class CSCWorkbench:
                 raise ValueError("The input file is empty or does not contain any data.")
         
         if verbose :
-            print(f"MMP-DF PRC Pipeline from {input_filename} with {len(data['signals'])} signals")
+            print(f"MMP-DF PRC Pipeline from {input_filename} with {len(data['mmp'])} signals")
 
         # Extract the signals from the DB
         mmpdf_results = data['mmp']
@@ -2497,7 +2497,7 @@ class CSCWorkbench:
                 raise ValueError("The input file is empty or does not contain any data.")
         
         if verbose :
-            print(f"OMP PRC Pipeline from {input_filename} with {len(data['signals'])} signals")
+            print(f"OMP PRC Pipeline from {input_filename} with {len(data['mmp'])} signals")
 
         # OMP parameter for MMPTree extraction
         max_branches = 3
@@ -2587,7 +2587,7 @@ class CSCWorkbench:
                 raise ValueError("The input file is empty or does not contain any data.")
         
         if verbose :
-            print(f"MP PRC Pipeline from {input_filename} with {len(data['signals'])} signals")
+            print(f"MP PRC Pipeline from {input_filename} with {len(data['mp'])} signals")
 
         # Extract the signals from the DB
         mp_results = data['mp']
