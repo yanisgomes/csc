@@ -320,13 +320,14 @@ class ZSDictionary() :
         atom = ZSAtom.from_dict(params_dict)
         offset = params_dict['x']
         return self.getActivationIdxFromAtom(atom, offset)
-    
+
     def getSignalProjectionFromAtoms(self, signal:np.ndarray, atoms_dicts:List[dict]) -> np.ndarray:
         """Project the activations on the dictionary
         Args:
             activations (np.ndarray): The activations of the signal
         Returns:
-            np.ndarray: The projection of the activations on the dictionary
+            approx (np.ndarray): The projection of the activations on the dictionary
+            activations (np.ndarray): The activations of the signal
         """
         # Activation mask parameters 
         signal_length = len(signal)
@@ -342,7 +343,19 @@ class ZSDictionary() :
         # Least Squares with QR decomposition
         # A @ x = b with A = masked_conv_op, x = activations, b = signal
         activations, *_ = lsqr(masked_conv_op, signal)
-        return masked_conv_op @ activations
+        approx = masked_conv_op @ activations
+        return approx, activations
+    
+    def getAtomFromActivationIdx(self, activation_idx:int) -> Tuple[ZSAtom, int]:
+        """Return the atom and the offset corresponding to the activation index
+        Args:
+            activation_idx (int): The index of the activation in the dictionary
+        Returns:
+            Tuple[ZSAtom, int]: The atom and the offset corresponding to the activation index
+        """
+        atom_idx = activation_idx % len(self.atoms)
+        offset = activation_idx // len(self.atoms)
+        return self.atoms[atom_idx], offset
 
     #               ______     __    __     ______  
     #              /\  __ \   /\ "-./  \   /\  == \ 

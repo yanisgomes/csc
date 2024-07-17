@@ -498,6 +498,64 @@ class CSCWorkbench:
         plt.suptitle(f'OMP and MMP comparison on signal n°{id}', fontsize=14)
         plt.show()
 
+    def plotMMPComparison(self, mmpdf_db_path:str, id:int) -> None :
+        """
+        Use three subplots to compare the results between the OMP and the MMP results.
+        The OMP result corresponds to the first branch of the MMP tree.
+        The MMP result corresponds to the MSE-argmin of the MMP tree.
+        """
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+        
+        # Get the true signal
+        signal_dict = self.signalDictFromId(id)
+        true_atoms = signal_dict['atoms']
+        true_signal = np.zeros_like(signal_dict['signal'])
+        for atom_dict in true_atoms :
+            zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['s'])
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
+            true_signal += atom_signal
+
+        fig, axs = plt.subplots(3, 1, figsize=(12, 3*3), sharex=True)
+        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
+        
+        # Find the OMP and the MMP dict
+        min_mse = np.inf
+        mmp_dict = None
+        mmp_path = None
+        mmp_tree_dict = mmp_result_dict['mmp-tree']
+
+        for path_str, leaf_dict in mmp_tree_dict.items() :
+            if all(c == '1' for c in path_str.split('-')) :
+                omp_dict = leaf_dict
+            if leaf_dict['mse'] <= min_mse :
+                mmp_dict = leaf_dict
+                min_mse = leaf_dict['mse']
+                mmp_path = path_str
+
+        # Extract the atoms from the dict
+        results_dict = [omp_dict, mmp_dict]
+        results_name = ['OMP', f'MMP {mmp_path}']
+
+        # Plot the comparison
+        for i, result_dict in enumerate(results_dict) :
+            approx, _ = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], result_dict['atoms'])
+            axs[0].plot(approx, color=f'C{i}', label=results_name[i])
+            axs[i+1].plot(true_signal, color='g')
+            axs[i+1].plot(approx, color=f'C{i}')
+            axs[i+1].plot(signal_dict['signal'], color='k', alpha=0.4, lw=3)
+            axs[i+1].set_title('{} : MSE = {}'.format(results_name[i], result_dict["mse"]), fontsize=12)
+            axs[0].legend(loc='best')
+            axs[i+1].axis('off')  
+            
+        axs[0].legend(loc='best') 
+        axs[0].axis('off')
+        plt.suptitle(f'OMP and MMP comparison on signal n°{id}', fontsize=14)
+        plt.show()
+
     def plotMMPDecomposition(self, db_path:str, id:int, verbose:bool=True) -> None :
         """
         Plot the signal decomposition.
@@ -541,25 +599,41 @@ class CSCWorkbench:
 
         fig, axs = plt.subplots(nb_atoms+1, 1, figsize=(12, (nb_atoms+1)*3), sharex=True)
     
-        # Create the signals
-        omp_signal = np.zeros_like(signal_dict['signal'])
-        mmp_signal = np.zeros_like(signal_dict['signal'])
+        # Create the OMP signal from the omp_atoms_dict
+        omp_signal, omp_activations = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], omp_atoms_dict)
+        omp_activations_indexes = np.argwhere(omp_activations > 0).flatten()
 
-        for i, (omp_atom, mmp_atom) in enumerate(zip(omp_atoms_dict, mmp_atoms_dict)) :
+        # Create the OMP signal from the omp_atoms_dict
+        mmp_signal, mmp_activations = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], mmp_atoms_dict)
+        mmp_activations_indexes = np.argwhere(mmp_activations > 0).flatten()
+
+        omp_atoms_signals = []
+        mmp_atoms_signals = []
+
+        for i, (omp_activation, mmp_activation) in enumerate(zip(omp_activations_indexes, mmp_activations_indexes)) :
             # Construct the atoms from parameters
-            omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
-            omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
-            mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
-            mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            omp_atom, omp_offset = self.dictionary.getAtomFromActivationIdx(omp_activation)
+            mmp_atom, mmp_offset = self.dictionary.getAtomFromActivationIdx(mmp_activation)
+
             # Get the atom signals
-            omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
-            omp_signal += omp_atom_signal
-            mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
-            mmp_signal += mmp_atom_signal
-            # Plot the atoms and the noisy signal
+            omp_atom_signal = omp_atom.getAtomInSignal(len(signal_dict['signal']), omp_offset)
+            mmp_atom_signal = mmp_atom.getAtomInSignal(len(signal_dict['signal']), omp_offset)
+            
+            # Plot the noisy signal
             axs[i+1].plot(signal_dict['signal'], label='Signal', color='k', alpha=0.3, lw=3)
-            axs[i+1].plot(omp_atom_signal, label='OMP atom')
-            axs[i+1].plot(mmp_atom_signal, label='MMP atom')
+            
+            # Plot the current OMP atoms
+            axs[i+1].plot(omp_atom_signal, label='OMP atom at step n°{i}', color='C0', alpha=1)
+            for omp_atom_signal in omp_atoms_signals :
+                axs[i+1].plot(omp_atom_signal, color='C0', alpha=0.3)
+            omp_atoms_signals.append(omp_atom_signal)
+
+            # Plot the current MMP atoms
+            axs[i+1].plot(mmp_atom_signal, label='MMP atom at step n°{i}', color='C1', alpha=1)
+            for mmp_atom_signal in mmp_atoms_signals :
+                axs[i+1].plot(mmp_atom_signal, color='C1', alpha=0.3)
+            mmp_atoms_signals.append(mmp_atom_signal)
+
             axs[i+1].set_title(f'Step n°{i+1}', fontsize=12)
             axs[i+1].legend(loc='best')
             axs[i+1].axis('off')
