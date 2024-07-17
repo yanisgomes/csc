@@ -1883,111 +1883,7 @@ class CSCWorkbench:
         cbar.solids.set(alpha=0.4)
 
         plt.show()
-
-#    8888888b.   .d88888b.   .d8888b.  
-#    888   Y88b d88P" "Y88b d88P  Y88b 
-#    888    888 888     888 888    888 
-#    888   d88P 888     888 888        
-#    8888888P"  888     888 888        
-#    888 T88b   888     888 888    888 
-#    888  T88b  Y88b. .d88P Y88b  d88P 
-#    888   T88b  "Y88888P"   "Y8888P"  
-
-
-    def computeROCMetricsPosition(self, true_atoms:List[Dict], predicted_atoms:List[Dict]) -> Tuple:
-        """
-        Compute the ROC metrics for the given true and predicted atoms.
-        """
-        # Get the number of true and predicted atoms
-        nb_true_atoms = len(true_atoms)
-        nb_approx_atoms = len(predicted_atoms)
-
-        # Atom matching
-        matched_atoms = self.computeMatchingPosition(true_atoms, predicted_atoms)
-
-        # Compute the True Positive, False Positive and False Negative
-        position_errors = [abs(true_atom['x'] - predicted_atom['x']) for true_atom, predicted_atom in matched_atoms]
-        tp = sum(1 for error in position_errors if error <= 5)
-        fp = nb_approx_atoms - tp  
-        fn = nb_true_atoms - tp       
-
-        return tp, fp, fn, nb_true_atoms, nb_approx_atoms
-
-    def calculateROCMetrics(self, row:pd.Series) -> Tuple:
-        """
-        Calculate the ROC metrics for the given row and position
-        Returns:
-            pd.Series: (TPR, FPR)
-        """
-        true_atoms = row['true_atoms']
-        predicted_atoms = row['predicted_atoms']
-
-        tp, fp, fn, nb_true_atoms, nb_approx_atoms = self.computeROCMetricsPosition(true_atoms, predicted_atoms)
-
-        return pd.Series([tp, fp, fn, nb_true_atoms, nb_approx_atoms])
-
-    def computeROCDataframe(self, db_path:str, process_data_func) :
-        """ 
-        Return the ROC dataframes for the given MP database.
-        """
-        processed_results = process_data_func(db_path)
-        # Convert data to DataFrame
-        df = pd.DataFrame(processed_results['results'])
-
-        # Apply the metrics function
-        metrics = df.apply(self.calculateROCMetrics, axis=1)
-        df[['tp', 'fp', 'fn', 'nb_true_atoms', 'nb_predicted_atoms']] = metrics
-
-        # Compute the FPR
-        df['fpr'] = np.where((df['nb_true_atoms'] - df['tp'] + df['fp']) > 0, df['fp'] / (df['nb_true_atoms'] - df['tp'] + df['fp']), 0)
-
-        # Compute the TPR
-        df['tpr'] = np.where((df['tp'] + df['fn']) > 0, df['tp'] / (df['tp'] + df['fn']), 0)
-
-        return df
-        
-    def plotROC(self, mmpdf_db_path: str, mp_db_path: str) -> None :
-        """
-        Plot the F1 score by SNR for different algorithms and sparsity levels.
-        """
-        plt.figure(figsize=(12, 8))
-
-        # MMP-DF database
-        mmpdf_metrics_df = self.computeROCDataframe(db_path=mmpdf_db_path, process_data_func=self.processMMPDFResults)
-
-        # MP database
-        mp_metrics_df = self.computeROCDataframe(db_path=mp_db_path, process_data_func=self.processMPResults)
-
-        # Merge the dataframes
-        metrics_df = pd.concat([mmpdf_metrics_df, mp_metrics_df], ignore_index=True)
-
-        # Define colors and markers for the plots
-        colors = {'OMP': 'navy', 'MMP-DF': 'red', 'MP': 'green'}
-        markers = {3: 'o', 4: 'D', 5: 'X'}  # Example for up to 5 sparsity levelsprint(metrics_df.loc[metrics_df['algo_type'] == 'MMP-DF', 'fpr'].unique())
-
-        print(f"MMP-DF FPR : {metrics_df.loc[metrics_df['algo_type'] == 'MMP-DF', 'fpr'].unique()}")
-        print(f"MMP-DF TPR : {metrics_df.loc[metrics_df['algo_type'] == 'MMP-DF', 'tpr'].unique()}\n")
-        print(f"OMP FPR : {metrics_df.loc[metrics_df['algo_type'] == 'OMP', 'fpr'].unique()}")
-        print(f"OMP TPR : {metrics_df.loc[metrics_df['algo_type'] == 'OMP', 'tpr'].unique()}\n")
-        print(f"MP FPR : {metrics_df.loc[metrics_df['algo_type'] == 'MP', 'fpr'].unique()}")
-        print(f"MP TPR : {metrics_df.loc[metrics_df['algo_type'] == 'MP', 'tpr'].unique()}\n")
-
-        # Group data and plot
-        sns.lineplot(x='fpr', y='tpr', hue='algo_type', data=metrics_df, palette="flare")
-        sns.despine(trim=True)
-
-        plt.title(f'Receiver Operating Characteristic', fontsize=16)
-        plt.xlabel('False positive rate', fontsize=14)
-        plt.ylabel('True positive rate', fontsize=14)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=12)
-        plt.legend(title='Algorithm', loc='best', fontsize=12)
-        plt.grid(True)
-        plt.gca().xaxis.set_major_locator(ticker.MultipleLocator(5))
-        plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(0.1))
-        plt.show()
-
-                                                
+                                         
 #       8 888888888o   8 888888888o.      ,o888888o.    
 #       8 8888    `88. 8 8888    `88.    8888     `88.  
 #       8 8888     `88 8 8888     `88 ,8 8888       `8. 
@@ -2615,330 +2511,121 @@ class CSCWorkbench:
     #     \/_/     \/_/ /_/   \/_____/      \/_/     \/_____/   \/_____/     \/_/ 
                                                                                
 
-    def displayPRCurve_MMPDF(self, mmpdf_dict: dict, max_branches: int = 10, max_sparsity: int = 10, verbose:bool=False) :
+    def plotPRCurvesFromDB(self, **kwargs) :
         """
-        Display the precision-recall curve for the given MMP-DF results.
-        
-        Args:
-            mmpdf_dict (dict): The MMP-DF dictionary.
-            max_branches (int): The maximum number of branches to consider.
-            max_sparsity (int): The maximum sparsity level to consider.
+        Plot the precision-recall curves from the results of the OMP and MP algorithms
+        Args :
+            prc_db_paths (dict) : The paths to the precision-recall databases
         """
-        # Step 1: Extract precision-recall data as DataFrame
-        pr_df = self.extractPRCurveData_MMPDF(mmpdf_dict, max_branches, max_sparsity, verbose=verbose)
+        prc_results = {}
+        n_samples=1000
+        maxSparsity = np.inf
+        maxSparsityArg = np.inf
+        for key, value in kwargs.items() :
+            if key == 'n_samples' :
+                n_samples = value
+            elif key == 'max_sparsity' :
+                maxSparsityArg = value
+            else :
+                with open(value, 'r') as f:
+                    prc_db = json.load(f)
+                    prc_results[key] = prc_db['prc']
+                    if prc_db['maxSparsity'] < maxSparsity :
+                        maxSparsity = prc_db['maxSparsity']
 
-        # Step 2: Convert DataFrame to numpy array
-        pr_array = pr_df[['precision', 'recall']].values
+        # Update the max sparsity level
+        maxSparsity = min(maxSparsity, maxSparsityArg)
 
-        # Step 3: Plot the precision-recall curve
-        ax = CSCWorkbench.plotPRCurve(pr_array)
-        plt.show()
+        # Extract the precision-recall data for each algorithm
+        pr_data = {}
+        for algorithm, results in prc_results.items() :
+            pr_data[algorithm] = []
+            for result in results :
+                metric_precisions = result['precisions']
+                metric_recalls = result['recalls']
+                sparsity_levels = result['sparsityLevels']
+                pr_array = np.array([[precision, recall] for precision, recall, sparsity in zip(metric_precisions, metric_recalls, sparsity_levels) if sparsity <= maxSparsity])
+                pr_data[algorithm].append(pr_array)
 
-    def displayPRCurveFromId_MMPDF(self, mmpdf_db_path:str, id:int, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) :
-        # Load the data
-        with open(mmpdf_db_path, 'r') as f:
-            output_data = json.load(f)
-            mmpdf_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
-
-        self.displayPRCurve_MMPDF(mmpdf_dict, max_branches=max_branches, max_sparsity=max_sparsity, verbose=verbose)
-
-    def displayPRCurveComparisonFromId(self, mmpdf_db_path:str, mp_db_path:str, id:int, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) :
-        # Load the MMP-DF data
-        with open(mmpdf_db_path, 'r') as f:
-            output_data = json.load(f)
-            mmpdf_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
-        
-        # Load the MP data
-        with open(mp_db_path, 'r') as f:
-            output_data = json.load(f)
-            mp_dict = next((result for result in output_data['mp'] if result['id'] == id), None)
-
-        # Step 1: Extract precision-recall data as DataFrame
-        mmpdf_pr_df = self.extractPRCurveData_MMPDF(mmpdf_dict, max_branches, max_sparsity, verbose=verbose)
-        omp_pr_df = self.extractPRCurveData_OMP(mmpdf_dict, max_branches, max_sparsity, verbose=verbose)
-        mp_pr_df = self.extractPRCurveData_MP(mp_dict, max_branches, max_sparsity, verbose=verbose)
-        
-        # Step 2: Convert DataFrame to numpy array
-        mmpdf_pr_array = mmpdf_pr_df[['precision', 'recall']].values
-        omp_pr_array = omp_pr_df[['precision', 'recall']].values
-        mp_pr_array = mp_pr_df[['precision', 'recall']].values
-
+        # Create the plot
         fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-        CSCWorkbench.plotPRCurve(mmpdf_pr_array, ax=ax, label='MMP-DF')
-        CSCWorkbench.plotPRCurve(omp_pr_array, ax=ax, label='OMP')
-        CSCWorkbench.plotPRCurve(mp_pr_array, ax=ax, label='MP')
-        plt.title(f'Precision-Recall Curve for signal n°{id}')
-        plt.legend(loc='best')
+        plt.axhline(y=0.5, color='black', linestyle='--', label='Chance level')
+
+        # Compute the mean precision-recall curve for each algorithm
+        for i, (algorithm, data) in enumerate(pr_data.items()) :
+            pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(data, n_samples)
+            CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=f'C{i}', label=algorithm)
+            CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=f'C{i}', alpha=0.4)
+            CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color=f'C{i}', alpha=0.4)
+            plt.fill_between(pr_mean[:, 1], pr_mean_plus_std[:, 0], pr_mean_minus_std[:, 0], alpha=0.13)
+        
+        plt.title('Precision-Recall Curve', fontsize=16)
+        plt.legend(loc='best', title='Algorithm')
+        plt.xlabel('Recall', fontsize=14)
+        plt.ylabel('Precision', fontsize=14)
         plt.show()
 
-    def displayPRCDecomposition(self, mmpdf_db_path:str, id:int, verbose:bool=False) :
-        # Load the data
-        with open(mmpdf_db_path, 'r') as f:
-            output_data = json.load(f)
-            mmpdf_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+    def plotPRCSNRFromDB(self, **kwargs) :
+        """
+        Plot the precision-recall curves from the results of the OMP and MP algorithms
+        Args :
+            prc_db_paths (dict) : The paths to the precision-recall databases
+        """
+        prc_results = {}
 
-        max_branches = 20
-        max_sparsity = 20
+        n_samples=1000
+        maxSparsity = np.inf
+        maxSparsityArg = np.inf
+        for key, value in kwargs.items() :
+            if key == 'n_samples' :
+                n_samples = value
+            elif key == 'max_sparsity' :
+                maxSparsityArg = value
+            else :
+                with open(value, 'r') as f:
+                    prc_db = json.load(f)
+                    prc_results[key] = prc_db['prc']
+                    if prc_db['maxSparsity'] < maxSparsity :
+                        maxSparsity = prc_db['maxSparsity']
 
-        # Step 1: Extract precision-recall data as DataFrame
-        pr_df = self.extractPRCurveData_MMPDF(mmpdf_dict, max_branches, max_sparsity)
+        # Update the max sparsity level
+        maxSparsity = min(maxSparsity, maxSparsityArg)
 
-        # Retrieve the tree structure to the max number of branches
-        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches)
-        
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
-        signal = signal_dict['signal']
-        true_atoms = signal_dict['atoms']
+        # Extract the precision-recall data for each algorithm
+        pr_data = {}
+        snrLevels = [-5, 0, 5, 10, 15]
+        for algorithm, results in prc_results.items() :
+            pr_data[algorithm] = {snr:[] for snr in snrLevels}
+            for result in results :
+                metric_precisions = result['precisions']
+                metric_recalls = result['recalls']
+                sparsity_levels = result['sparsityLevels']
+                pr_array = np.array([[precision, recall] for precision, recall, sparsity in zip(metric_precisions, metric_recalls, sparsity_levels) if sparsity <= maxSparsity])
+                pr_data[algorithm][result['snr']].append(pr_array)
 
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-
-        fig, axs = plt.subplots(len(sparsity_levels), 2, figsize=(15, 4*len(sparsity_levels)),
-                            gridspec_kw={'width_ratios': [3, 1]}, sharex='col')
-        
-        for i, candidate_sparsity in enumerate(sparsity_levels) :
-
-            # Extract the candidate atoms
-            candidate_atoms = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, self.dictionary, signal, candidate_sparsity=candidate_sparsity)
-
-            # Plot the noisy signal
-            axs[i, 0].plot(signal, label='Noisy signal', color='k', alpha=0.4, lw=3)
-
-            matched_atoms = self.computeMatchingPosition(true_atoms, candidate_atoms)
-            
-            alphas = [0.4]*len(matched_atoms)
-            alphas[-1] = 1
-
-            for j, (true_atom, cand_atom) in enumerate(matched_atoms) : 
-                # Plot the true atoms
-                t_atom = ZSAtom.from_dict(true_atom)
-                t_atom.padBothSides(self.dictionary.getAtomsLength())
-                t_atom_signal = t_atom.getAtomInSignal(len(signal), true_atom['x'])
-                axs[i, 0].plot(t_atom_signal, label=f'True atom n°{j+1} at x={true_atom["x"]}', lw=1, color='g', alpha=alphas[j])
-                # Plot the cand atoms
-                c_atom = ZSAtom.from_dict(cand_atom)
-                c_atom.padBothSides(self.dictionary.getAtomsLength())
-                c_atom_signal = c_atom.getAtomInSignal(len(signal), cand_atom['x'])
-                axs[i, 0].plot(c_atom_signal, label=f'Cand atom n°{j+1} at x={cand_atom["x"]}', lw=1, color='b', alpha=alphas[j])
-
-            # Compute the precision and the recall with the TP, FP, FN Metrics
-            tp, fp, fn = self.computeTPFPFNMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
-            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-            recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-
-            axs[i, 0].set_title(f'Step n°{i} : sparsity {candidate_sparsity} ==> Number of atoms : {len(matched_atoms)}', fontsize=14)
-            axs[i, 0].legend(loc='best')
-            axs[i, 0].axis('off')
-
-            # Displaying TP, FP, FN in a table on the right axis
-            colLabels = ["TP", "FP", "FN"]
-            rowLabels = ["Value"]
-            table_data = [[tp, fp, fn]]
-            table = axs[i, 1].table(cellText=table_data, colLabels=colLabels, rowLabels=rowLabels, loc='center', cellLoc='center')
-            table.auto_set_font_size(False)
-            table.set_fontsize(10)
-            table.scale(1, 2)
-
-            axs[i, 1].set_title(f'Precision = {round(precision, 2)} ; Recall = {round(recall, 2)}', fontsize=14)
-            axs[i, 1].axis('off')
-
-        plt.tight_layout()
-        plt.show()
-
-    def computePRCurvesFromSparsity(self, mmpdf_db_path:str, sparsity:int, verbose:bool=False) :
-        # Load the data
-        with open(mmpdf_db_path, 'r') as f:
-            output_data = json.load(f)
-            mmp_results = output_data['mmp']
-
-        max_branches = 10
-        max_sparsity = 10
-
-        all_pr = []
-
-        for mmp_dict in mmp_results :
-            if mmp_dict['sparsity'] == sparsity :
-                pr_df = self.extractPRCurveData_MMPDF(mmp_dict, max_branches, max_sparsity, verbose=verbose)
-                pr_array = pr_df[['precision', 'recall']].values
-                all_pr.append(pr_array)
-
-        return all_pr
-
-    def displayMeanPRCurveFromSparsity(self, mmpdf_db_path:str, sparsity:int, verbose:bool=False) :
-        
-        all_pr = self.computePRCurvesFromSparsity(mmpdf_db_path, sparsity)
-
-        fig, ax = plt.subplots()
-        pr_mean, pr_mean_plus_std, pr_mean_minus_std = self.computeMeanPRCurve(all_pr, n_samples=1000, verbose=verbose)
-
-        CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color="k", alpha=1)
-        CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color="r", alpha=0.5)
-        CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color="r", alpha=0.5)
-
-    def computePRCurves_MMPDF(self, mmpdf_db_path:str, max_branches:int, max_sparsity:int, verbose:bool=False) :
-        # Load the data
-        with open(mmpdf_db_path, 'r') as f:
-            output_data = json.load(f)
-            mmp_results = output_data['mmp']
-
-            all_pr_dict = {}
-
-            for sparsity in output_data['sparsityLevels'] :
-                all_pr_dict[sparsity] = list()
-
-        for mmp_dict in mmp_results :
-            pr_df = self.extractPRCurveData_MMPDF(mmp_dict, max_branches, max_sparsity, verbose=verbose)
-            pr_array = pr_df[['precision', 'recall']].values
-            all_pr_dict[mmp_dict['sparsity']].append(pr_array)
-
-        return all_pr_dict
-    
-    def computePRCurves_OMP(self, mmpdf_db_path:str, max_branches:int, max_sparsity:int, verbose:bool=False) :
-        # Load the data
-        with open(mmpdf_db_path, 'r') as f:
-            output_data = json.load(f)
-            mmp_results = output_data['mmp']
-
-            all_pr_dict = {}
-
-            for sparsity in output_data['sparsityLevels'] :
-                all_pr_dict[sparsity] = list()
-
-
-        for mmp_dict in mmp_results :
-            pr_df = self.extractPRCurveData_OMP(mmp_dict, max_branches, max_sparsity, verbose=verbose)
-            pr_array = pr_df[['precision', 'recall']].values
-            all_pr_dict[mmp_dict['sparsity']].append(pr_array)
-
-        return all_pr_dict
-
-    def computePRCurves_MP(self, mp_db_path:str, max_branches:int, max_sparsity:int, verbose:bool=False) :
-        # Load the data
-        with open(mp_db_path, 'r') as f:
-            output_data = json.load(f)
-            mp_results = output_data['mp']
-
-            all_pr_dict = {}
-
-            for sparsity in output_data['sparsityLevels'] :
-                all_pr_dict[sparsity] = list()
-
-        for mp_dict in mp_results :
-            pr_df = self.extractPRCurveData_MP(mp_dict, max_branches, max_sparsity, verbose=verbose)
-            pr_array = pr_df[['precision', 'recall']].values
-            try :
-                all_pr_dict[mp_dict['sparsity']].append(pr_array)
-    
-            except KeyError :
-                # Unexplained error in csc-mp-200.json
-                # "id": 2165
-                # "sparsity": 2
-                pass
-
-        return all_pr_dict
-    
-    def computeMeanPRCComparisonFromId(self, mmpdf_db_path:str, mp_db_path:str, id:int, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) :
-
-        # Load the MMP-DF data
-        with open(mmpdf_db_path, 'r') as f:
-            output_data = json.load(f)
-            mmpdf_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
-        
-        # Load the MP data
-        with open(mp_db_path, 'r') as f:
-            output_data = json.load(f)
-            mp_dict = next((result for result in output_data['mp'] if result['id'] == id), None)
-
-        # Step 1: Extract precision-recall data as DataFrame
-        mmpdf_pr_df = self.extractPRCurveData_MMPDF(mmpdf_dict, max_branches, max_sparsity, verbose=verbose)
-        omp_pr_df = self.extractPRCurveData_OMP(mmpdf_dict, max_branches, max_sparsity, verbose=verbose)
-        mp_pr_df = self.extractPRCurveData_MP(mp_dict, max_branches, max_sparsity, verbose=verbose)
-        
-        # Step 2: Convert DataFrame to numpy array
-        mmpdf_pr_array = mmpdf_pr_df[['precision', 'recall']].values
-        omp_pr_array = omp_pr_df[['precision', 'recall']].values
-        mp_pr_array = mp_pr_df[['precision', 'recall']].values
-
+        # Create the plot
         fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-        CSCWorkbench.plotPRCurve(mmpdf_pr_array, ax=ax, label='MMP-DF')
-        CSCWorkbench.plotPRCurve(omp_pr_array, ax=ax, label='OMP')
-        CSCWorkbench.plotPRCurve(mp_pr_array, ax=ax, label='MP')
-        plt.title(f'Precision-Recall Curve for signal n°{id}')
-        plt.legend(loc='best')
+        plt.axhline(y=0.5, color='black', linestyle='--', label='Chance level')
+
+        # Compute the mean precision-recall curve for each algorithm
+        for i, (algorithm, snr_data) in enumerate(pr_data.items()) :
+            for j, (snr, data) in enumerate(snr_data.items()) :
+                pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(data, n_samples)
+                color = f'C{len(snrLevels) * i + j}'
+                CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=color, label=f'{algorithm} - SNR {snr}')
+                CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=color, alpha=0.4)
+                CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color=color, alpha=0.4)
+                #plt.fill_between(pr_mean[:, 1], pr_mean_plus_std[:, 0], pr_mean_minus_std[:, 0], alpha=0.1)
+
+        plt.title('Precision-Recall Curve', fontsize=16)
+        plt.legend(loc='best', title='Algorithm')
+        plt.xlabel('Recall', fontsize=14)
+        plt.ylabel('Precision', fontsize=14)
         plt.show()
 
-    def displayMeanPRC(self, mmpdf_db_path:str, mp_db_path:str, max_branches:int=10, max_sparsity:int=50, verbose:bool=False) :
 
-        mmpdf_all_pr_dict = self.computePRCurves_MMPDF(mmpdf_db_path, max_branches=max_branches, max_sparsity=max_sparsity)
-        omp_all_pr_dict = self.computePRCurves_OMP(mmpdf_db_path, max_branches=10, max_sparsity=max_sparsity)
+    
 
-        mmpdf_prc = list()
-        omp_prc = list()
 
-        # MMP-DF
-        for sparsity, arrays in mmpdf_all_pr_dict.items():
-            if verbose :
-                print(f'MMP-DF: sparsity={sparsity} : {len(arrays)} x {arrays[0].shape}')
-            for signal_prc in arrays :
-                mmpdf_prc.append(signal_prc)
 
-        # OMP
-        for sparsity, arrays in omp_all_pr_dict.items():
-            if verbose :
-                print(f'MMP-DF: sparsity={sparsity} : {len(arrays)} x {arrays[0].shape}')
-            for signal_prc in arrays :
-                omp_prc.append(signal_prc)
-
-        mmpdf_pr_mean, mmpdf_pr_mean_plus_std, mmpdf_pr_mean_minus_std = self.computeMeanPRCurve(mmpdf_prc, n_samples=1000)
-        omp_pr_mean, omp_pr_mean_plus_std, omp_pr_mean_minus_std = self.computeMeanPRCurve(omp_prc, n_samples=1000)
-
-        fig, ax = plt.subplots()
-
-        # Plot mean MMP-DF curve
-        CSCWorkbench.plotPRCurve(mmpdf_pr_mean, ax=ax, color="C1", label="MMP-DF", alpha=1)
-        CSCWorkbench.plotPRCurve(mmpdf_pr_mean_plus_std, ax=ax, color="C1", alpha=0.5)
-        CSCWorkbench.plotPRCurve(mmpdf_pr_mean_minus_std, ax=ax, color="C1", alpha=0.5)
-
-        # Plot mean OMP curve
-        CSCWorkbench.plotPRCurve(omp_pr_mean, ax=ax, color="b", label="OMP", alpha=1)
-        CSCWorkbench.plotPRCurve(omp_pr_mean_plus_std, ax=ax, color="b", alpha=0.5)
-        CSCWorkbench.plotPRCurve(omp_pr_mean_minus_std, ax=ax, color="b", alpha=0.5)
-
-        plt.title('Precision-Recall curves for OMP and MMP-DF')
-        plt.legend(loc='best')
-        plt.show()
-
-    def displayMeanPRCFromDict(self, mmpdf_all_pr_dict:dict, omp_all_pr_dict:dict, max_branches:int=10, max_sparsity:int=50, verbose:bool=False) :
-
-        mmpdf_prc = list()
-        omp_prc = list()
-
-        # MMP-DF
-        for sparsity, arrays in mmpdf_all_pr_dict.items():
-            for signal_prc in arrays :
-                mmpdf_prc.append(signal_prc)
-
-        # OMP
-        for sparsity, arrays in omp_all_pr_dict.items():
-            for signal_prc in arrays :
-                omp_prc.append(signal_prc)
-
-        mmpdf_pr_mean, mmpdf_pr_mean_plus_std, mmpdf_pr_mean_minus_std = self.computeMeanPRCurve(mmpdf_prc, n_samples=1000)
-        omp_pr_mean, omp_pr_mean_plus_std, omp_pr_mean_minus_std = self.computeMeanPRCurve(omp_prc, n_samples=1000)
-
-        fig, ax = plt.subplots()
-
-        # Plot mean MMP-DF curve
-        CSCWorkbench.plotPRCurve(mmpdf_pr_mean, ax=ax, color="C1", label="MMP-DF", alpha=1)
-        CSCWorkbench.plotPRCurve(mmpdf_pr_mean_plus_std, ax=ax, color="C1", alpha=0.5)
-        CSCWorkbench.plotPRCurve(mmpdf_pr_mean_minus_std, ax=ax, color="C1", alpha=0.5)
-
-        # Plot mean OMP curve
-        CSCWorkbench.plotPRCurve(omp_pr_mean, ax=ax, color="b", label="OMP", alpha=1)
-        CSCWorkbench.plotPRCurve(omp_pr_mean_plus_std, ax=ax, color="b", alpha=0.5)
-        CSCWorkbench.plotPRCurve(omp_pr_mean_minus_std, ax=ax, color="b", alpha=0.5)
-
-        plt.title('Precision-Recall curves for OMP and MMP-DF')
-        plt.legend(loc='best')
-        plt.show()
+    
