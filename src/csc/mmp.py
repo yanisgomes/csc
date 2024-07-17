@@ -16,7 +16,6 @@ from collections import Counter
 from joblib import Parallel, delayed
 
 from .atoms import ZSAtom
-from .dictionary import ZSDictionary
 from .utils import *
 
 class MMPNode:
@@ -503,23 +502,6 @@ class MMPTree() :
         sparsity = len(list(mmp_paths)[0].split('-'))
         connections = max([max([int(layer_order) for layer_order in p.split('-')]) for p in mmp_paths])
         return sparsity, connections
-    
-    @staticmethod
-    def shrinkMMPTreeDict(mmp_tree_dict:dict, max_branches:int) :
-        """
-        Shrink the MMPTree dictionary to a maximum number of branches.
-        Args:
-            mmp_tree_dict (dict): The MMPTree dictionary
-            max_branches (int): The maximum number of branches
-        Returns:
-            mmp_tree_dict (dict): The shrunk MMPTree dictionary
-        """
-        tree_sparsity, tree_connections = MMPTree.getTreeParamsFromMMPTreeDict(mmp_tree_dict)
-        for path, leaf_dict in mmp_tree_dict.items() :
-            branch_number = MMPTree.getCandidateNumber(tree_sparsity, tree_connections, list(map(int, path.split('-'))))
-            if branch_number > max_branches :
-                del mmp_tree_dict[path]
-        return mmp_tree_dict
 
     @staticmethod
     def shrinkMMPTreeDict(mmp_tree_dict:dict, max_branches:int):
@@ -545,7 +527,7 @@ class MMPTree() :
         return mmp_tree_dict
     
     @staticmethod
-    def getSubTreeFromMMPTreeDict(mmp_tree_dict:dict, dictionary:ZSDictionary, signal:np.ndarray, sparsity:int, verbose:bool=False) -> dict :
+    def getSubTreeFromMMPTreeDict(mmp_tree_dict:dict, dictionary, signal:np.ndarray, sparsity:int, verbose:bool=False) -> dict :
         """
         Get a sub-tree from the MMPTree dictionary with a given sparsity.
         """
@@ -575,7 +557,7 @@ class MMPTree() :
         return mmp_sub_tree_dict
     
     @staticmethod
-    def mmpdfCandidateFromMMPTreeDict(mmp_tree_dict:dict, atom_length:int, signal:np.ndarray, candidate_sparsity:int, verbose:bool=False) :
+    def mmpdfCandidateFromMMPTreeDict(mmp_tree_dict:dict, dictionary, signal:np.ndarray, candidate_sparsity:int, verbose:bool=False) :
         """
         Build a candidate from the MMPTree dictionary if the MMP algorithm has been run with candidate_sparsity.
         Args:
@@ -590,7 +572,7 @@ class MMPTree() :
         tree_sparsity, tree_connections = MMPTree.getTreeParamsFromMMPTreeDict(mmp_tree_dict)
 
         # The subtree is the MMPTree result if the sparsity had been candidate_sparsity < tree_sparsity
-        mmp_sub_tree_dict = MMPTree.getSubTreeFromMMPTreeDict(mmp_tree_dict, atom_length, signal, candidate_sparsity)
+        mmp_sub_tree_dict = MMPTree.getSubTreeFromMMPTreeDict(mmp_tree_dict, dictionary, signal, candidate_sparsity)
 
         max_sparsity = min(candidate_sparsity, tree_sparsity)
         min_mse = np.inf
@@ -609,7 +591,7 @@ class MMPTree() :
         return argmin_mse_atoms
             
     @staticmethod
-    def ompCandidateFromMMPTreeDict(mmp_tree_dict:dict, dictionary:ZSDictionary, signal:np.ndarray, candidate_sparsity:int, verbose:bool=False) :
+    def ompCandidateFromMMPTreeDict(mmp_tree_dict:dict, dictionary, signal:np.ndarray, candidate_sparsity:int, verbose:bool=False) :
         """
         Build a candidate from the MMPTree dictionary if the OMP algorithm has been run with candidate_sparsity.
         Args:
