@@ -1406,6 +1406,7 @@ class CSCWorkbench:
             signal_atoms = signal_dict['atoms']
             true_signal = np.zeros_like(signal_dict['signal'])
             for atom in signal_atoms:
+
                 zs_atom = ZSAtom.from_dict(atom)
                 zs_atom.padBothSides(self.dictionary.getAtomsLength())
                 atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
@@ -1475,6 +1476,55 @@ class CSCWorkbench:
         df_all_snr = pd.DataFrame(data_overlap_intervals)
         df = df_all_snr.loc[df_all_snr['snr'] == snr]
         sns.boxplot(x='overlap', y='local_mse', hue='algo_type', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
+        sns.despine(trim=True)
+        plt.title('OMP vs MMPDF local MSE Comparison by local overlap level', fontsize=14)
+        plt.xlabel('Overlap >=', fontsize=12)
+        plt.ylabel('Local MSE', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.legend(title='Algorithm', loc='best')
+        plt.show()
+
+    def computeMSEPerOverlapInterval_MMPDF(self, mmpdf_sparVar_db_path:str) -> Dict:
+        pass
+
+    def computeMSEPerOverlapInterval_OMP(self, db_path:str) -> Dict:
+        pass
+
+    def computeMSEPerOverlapInterval_MP(self, db_path:str) -> Dict:
+        pass
+
+    def computeMSEPerOverlapInterval_L1(self, db_path:str) -> Dict:
+        pass
+
+    def plotMSEOverlapBoxplot(self, snr:int=-5, **kwargs) :
+        """
+        Plot the boxplot of the position errors
+        Args:
+            mmpdf_db_path (str): Path to the MMPDF database.
+        """
+        plt.figure(figsize=(12, 8)) 
+
+        # Compute the local MSE per overlap interval for each algorithm
+        algo_intervals = dict()
+        for key, value in kwargs.items():
+            if 'MMP' in key.lower() :
+                algo_intervals[key] = self.computeMSEPerOverlapInterval_MMPDF(value)
+            elif 'OMP' in key.lower() :
+                algo_intervals[key] = self.computeMSEPerOverlapInterval_OMP(value)
+            elif 'MP' in key.lower() :
+                algo_intervals[key] = self.computeMSEPerOverlapInterval_MP(value)
+            elif 'L1' in key.lower() :
+                algo_intervals[key] = self.computeMSEPerOverlapInterval_L1(value)
+            else :
+                raise ValueError(f'Unknown algorithm type : {key}')
+
+        # Plot the boxplot for each algorithm
+        for algorithm, dict_intervals in algo_intervals.items():
+            df_all_snr = pd.DataFrame(dict_intervals)
+            df = df_all_snr.loc[df_all_snr['snr'] == snr]
+            sns.boxplot(x='overlap', y='local_mse', hue='algo_type', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
+            
         sns.despine(trim=True)
         plt.title('OMP vs MMPDF local MSE Comparison by local overlap level', fontsize=14)
         plt.xlabel('Overlap >=', fontsize=12)
@@ -2383,7 +2433,7 @@ class CSCWorkbench:
 
         # Parallelize the OMP algorithm on the signals from the DB
         mmpdf_sparVar_results = Parallel(n_jobs=nb_cores)(delayed(self.computeSparsityVariation_MMPDF)(mmpdf_dict, max_branches=max_branches, max_sparsity=max_sparsity, verbose=verbose) for mmpdf_dict in tqdm(mmpdf_results, desc='MMP-DF sparsity variation Pipeline from DB'))
-        results['mmp'] = mmpdf_sparVar_results
+        results['results'] = mmpdf_sparVar_results
         # Save the results in a JSON file
         json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
         if verbose :
@@ -2544,7 +2594,7 @@ class CSCWorkbench:
 
         # Parallelize the OMP algorithm on the signals from the DB
         omp_sparVar_results = Parallel(n_jobs=nb_cores)(delayed(self.computeSparsityVariation_OMP)(mmpdf_dict, max_sparsity=max_sparsity, verbose=verbose) for mmpdf_dict in tqdm(mmpdf_results, desc='OMP sparsity variation Pipeline from DB'))
-        results['omp'] = omp_sparVar_results
+        results['results'] = omp_sparVar_results
         # Save the results in a JSON file
         json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
         if verbose :
@@ -2699,7 +2749,7 @@ class CSCWorkbench:
 
         # Parallelize the OMP algorithm on the signals from the DB
         mp_sparVar_results = Parallel(n_jobs=nb_cores)(delayed(self.computeSparsityVariation_MP)(mp_dict, max_sparsity=max_sparsity, verbose=verbose) for mp_dict in tqdm(mp_results, desc='MP sparVar Pipeline from DB'))
-        results['mp'] = mp_sparVar_results
+        results['results'] = mp_sparVar_results
         # Save the results in a JSON file
         json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
         if verbose :
@@ -3038,8 +3088,8 @@ class CSCWorkbench:
             CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=color, alpha=0.3)
             CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color=color, alpha=0.3)
             plt.fill_between(pr_mean[:, 1], pr_mean_plus_std[:, 0], pr_mean_minus_std[:, 0], alpha=0.1)
-            
-        plt.title('Precision-Recall Curve', fontsize=16)
+
+        plt.title(f'Precision-Recall Curve : position_error_threshold = {position_error_threshold}', fontsize=16)
         plt.legend(loc='best', title='Algorithms')
         plt.xlabel('Recall', fontsize=14)
         plt.ylabel('Precision', fontsize=14)
