@@ -588,7 +588,7 @@ class MMPTree() :
         if verbose :
             print(f'MMP-DF : {argmin_mse_branch} | MSE = {min_mse}')
 
-        return argmin_mse_atoms
+        return argmin_mse_atoms, min_mse
             
     @staticmethod
     def ompCandidateFromMMPTreeDict(mmp_tree_dict:dict, dictionary, signal:np.ndarray, candidate_sparsity:int, verbose:bool=False) :
@@ -618,4 +618,4 @@ class MMPTree() :
         if verbose :
             print(f'OMP : {omp_sub_branch_name} MSE = {candidate_mse}')
 
-        return omp_sub_branch_atoms
+        return omp_sub_branch_atoms, candidate_mse
