@@ -2721,48 +2721,28 @@ class CSCWorkbench:
     #       ╠═╣║  ╠═╝╠═╣╠═╣───│  └─┐│  
     #       ╩ ╩╩═╝╩  ╩ ╩╩ ╩   └─┘└─┘└─┘
 
-    def computePRDataFromDict_L1(self, mp_dict:dict, max_sparsity:int=10, verbose:bool=False) -> dict:
+    def computeSparsityVariation_alphaCSC(self, signal_dict:dict, max_sparsity:int=10, verbose:bool=False) -> dict:
         """
-        Process the OMP from MMP-DF dict to extract precision-recall data.
+        Process the MP sparVar from MP dict to extract precision-recall data.
         Args :
             mmpdf_dict (dict) : The MMP-DF dictionary.
             max_sparsity (int) : The maximum sparsity level to consider.
         Returns :
             dict : The precision-recall data.
         """
-        # Retrieve the atoms from the MP algorithm output
-        approx_atoms = mp_dict['atoms']
-
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mp_dict['id'])
-        signal = signal_dict['signal']
-        true_atoms = signal_dict['atoms']
-
-        if verbose :
-            print(f"compute MP PRC for {signal_dict['id']} with {signal_dict['sparsity']} atoms")
-
-        # Initialize the precion-recall dataframe
-        precisions = []
-        recalls = []
-
         # Iterate over the attended sparsity levels
         sparsity_levels = [i+1 for i in range(max_sparsity)]
+        sparsityVariationsAtoms = {}
         for candidate_sparsity in sparsity_levels :
-            candidate_atoms = approx_atoms[:min(candidate_sparsity, len(approx_atoms))]
-            precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20)
-            precisions.append(precision)
-            recalls.append(recall)
+            candidate_atoms = self.dictionary.alphaCSCResultFromDict
 
-        mp_pr_results = {
+        mp_sparVar_results = {
             'id': signal_dict['id'],
-            'snr': signal_dict['snr'],
-            'trueSparsity': signal_dict['sparsity'],
             'sparsityLevels': sparsity_levels,
-            'precisions': precisions,
-            'recalls': recalls
+            'atoms': sparsityVariationsAtoms
         }
 
-        return mp_pr_results
+        return mp_sparVar_results
 
     #    ______   ______     ______        ______   __         ______     ______  
     #   /\  == \ /\  == \   /\  ___\      /\  == \ /\ \       /\  __ \   /\__  _\ 

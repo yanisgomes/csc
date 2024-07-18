@@ -1,4 +1,5 @@
 import os
+import math
 import time
 import json
 from tqdm import tqdm
@@ -739,292 +740,62 @@ class ZSDictionary() :
 #    "88_-888 888 888-_88"  888  888  "88_-888       "88_-~  \__88P'  "88_-~  
 #                 888                                                         
 #   
-    
-    def alphaCSCResult(self, signal_dict:dict, lmbda:float) -> dict:
-        # Extraction et préparation des données similaires à avant
+
+    def alphaCSCResultFromDict(self, signal_dict: dict, nb_activations: int, verbose: bool = False, tolerance: float = 30.0) -> dict:
         signal = np.array(signal_dict['signal'])
         D = self.getLocalDictionary()
 
         if signal.ndim == 1:
             signal = signal[np.newaxis, :]
 
-        activations = update_z(signal, D, lmbda).squeeze() # (n_atoms, n_times)
-        
-        # Finding non-zero entries in activations to identify active atoms and their positions
-        nnz_indexes = np.nonzero(activations)  # Returns a tuple of arrays (row_indices, col_indices)
-        atoms_idx, positions_idx = nnz_indexes
+        lmbda = 5e-5  # initial small lambda
+        activations = None
+        last_nnz_activations = None
+        target_activations = nb_activations
+        tolerance_margin = math.ceil(tolerance / 100 * target_activations)
+        iter = 0
 
-        # Packaging the results
-        csc_result = {
-            'activations': activations,
-            'atoms_idx': atoms_idx,          # Indices of atoms that are active
-            'positions_idx': positions_idx,  # Positions in the signal where these atoms are active
-        }
+        while True :
+            activations = update_z(signal, D, lmbda).squeeze()  # Assuming update_z returns the activations array
+            activations = activations.flatten()
+            nnz_indexes, = np.nonzero(activations)
+            len_activations = len(nnz_indexes)
+            if len_activations > 0:
+                last_nnz_activations = activations[nnz_indexes]
 
-        return csc_result
-    
-    def alphaCSCResult(self, signal_dict:dict, lmbda:float, verbose:bool=False) -> dict:
-        # Extraction et préparation des données similaires à avant
-        signal = np.array(signal_dict['signal'])
-        D = self.getLocalDictionary()
+            if verbose:
+                print(f'Iteration {iter}: lambda = {lmbda:.2e}, Number of Activations = {len_activations}')
 
-        if signal.ndim == 1:
-            signal = signal[np.newaxis, :]
+            # Break condition with tolerance margin
+            if len_activations - target_activations >= 0 and len_activations - target_activations <= tolerance_margin:
+                break
 
-        activations = update_z(signal, D, lmbda).squeeze() # (n_atoms, n_times)
-        if verbose :
-            print(activations.shape)
-        
-        # Finding non-zero entries in activations to identify active atoms and their positions
-        activations = activations.flatten()
-        nnz_indexes = np.nonzero(activations)
-        if verbose :
-            print(f'Nb nnz indexes = {len(nnz_indexes)}')
+            # Break condition on the number of iterations
+            if iter >= 200 :
+                activations = last_nnz_activations
+                break
 
+            # Update lambda based on the difference between current and target activations
+            if len_activations > target_activations:
+                last_lmbda = lmbda
+                lmbda *= 1 + 0.08*(len_activations - target_activations) / target_activations
+            else:
+                last_lmbda_coeff = 0.95
+                lmbda = (1 - last_lmbda_coeff) * lmbda + last_lmbda_coeff * last_lmbda
+            iter += 1
+
+        # Post-processing of activations
         nnz_values = activations[nnz_indexes]
-        # Sort in descending order
-        order = np.argsort(nnz_values)[::-1] 
-        nnz_indexes = nnz_indexes[order]
+        order = np.argsort(nnz_values)[::-1]
+        nnz_indexes_sorted = nnz_indexes[order]
 
-        # Extract the atoms and their parameters
-        positions_idx, atoms_idx = np.unravel_index(
-            nnz_indexes,
-            shape=activations.reshape(-1, len(self.atoms)).shape,
-        )
+        # Extract atoms and their parameters
+        positions_idx, atoms_idx = np.unravel_index(nnz_indexes_sorted, shape=activations.reshape(-1, len(D)).shape)
 
-        # Packaging the results
-        csc_result = {
-            'activations': activations,
-            'atoms_idx': atoms_idx,          # Indices of atoms that are active
-            'positions_idx': positions_idx,  # Positions in the signal where these atoms are active
-        }
+        results = list()
+        for pos_idx, atom_idx in zip(positions_idx, atoms_idx):
+            b, y, s = self.atoms[atom_idx].params['b'], self.atoms[atom_idx].params['y'], self.atoms[atom_idx].params['sigma']
+            results.append({'x': pos_idx, 'b': b, 'y': y, 's': s})
 
-        return csc_result
-
-    def alphaCSCAutoCalibrationResult(self, signal_dict:dict, nb_activations:int, verbose=False) :
-        """
-        Calibrate the alphaCSC algorithm with the best lambda
-        Returns:
-            lambda_nnz : the lambda corresponding to the last number of non-zero activation
-            list_nb_activations[last_nnz_index] : the number of activations corresponding to the last number of non-zero activation
-        """
-        nb_lambdas = 10
-        max_activations = 100
-        list_lambdas = np.logspace(-4, 3, nb_lambdas)
-        last_list_lambdas = list_lambdas
-        lambda_nnz = None
-        # Find the lambda that gives a number of activations less than max_activations
-        iter_counter = 0
-        csc_results = []
-        while True :
-            iter_counter += 1  
-            last_list_lambdas = list_lambdas
-
-            if verbose : 
-                print('    Calibration interval n°{} [{:.2e}, {:.2e}] :'.format(iter_counter, list_lambdas[0], list_lambdas[-1]))
-            
-            list_nb_activations = list()
-            for i, lmbda in enumerate(list_lambdas) :   
-                csc_result = self.alphaCSCResult(signal_dict, lmbda)
-                csc_results.append(csc_result)
-                nb_activations = len(csc_result['atoms_idx'])
-                list_nb_activations.append(nb_activations)
-                if verbose :
-                    print('       {} - lmba = {:.2e} : nb_act = {}'.format(i, lmbda, nb_activations))
-            
-            last_nnz_index = next((i for i, val in enumerate(list_nb_activations) if val == 0), nb_lambdas) - 1
-            min_nb_activations = list_nb_activations[last_nnz_index]
-
-            if verbose :
-                print('   >>> Last non-zero index : {} for {} activations'.format(last_nnz_index, list_nb_activations[last_nnz_index]))
-
-            if min_nb_activations == nb_activations :
-                break
-            elif min_nb_activations > nb_activations :
-                lambda_nnz = list_lambdas[last_nnz_index]
-                lambda_zero = list_lambdas[last_nnz_index+1]
-                nb_lambdas = 10
-                list_lambdas = np.logspace(np.log10(lambda_nnz), np.log10(lambda_zero), nb_lambdas)
-            elif min_nb_activations < nb_activations :
-                lambda_nnz = list_lambdas[last_nnz_index]
-                lambda_zero = list_lambdas[last_nnz_index+1]
-                nb_lambdas *= 2
-                list_lambdas = np.logspace(np.log10(lambda_nnz), np.log10(lambda_zero), nb_lambdas)
-
-        if verbose :
-            print('Optimal lambda for {} activations : {}'.format(list_nb_activations[last_nnz_index], lambda_nnz))
-            print('alpha-CSC result : {}'.format(csc_results[last_nnz_index]))
-        return csc_results[last_nnz_index]
-
-    def alphaCSCGetOptimalLambda(self, signal_dict, verbose=False) :
-        """
-        Calibrate the alphaCSC algorithm with the best lambda
-        Returns:
-            lambda_nnz : the lambda corresponding to the last number of non-zero activation
-            list_nb_activations[last_nnz_index] : the number of activations corresponding to the last number of non-zero activation
-        """
-        nb_lambdas = 10
-        max_activations = 100
-        list_lambdas = np.logspace(-4, 3, nb_lambdas)
-        lambda_nnz = None
-        # Find the lambda that gives a number of activations less than max_activations
-        iter_counter = 0
-        while True :
-            iter_counter += 1  
-            if verbose : 
-                print('    Calibration interval n°{} [{:.2e}, {:.2e}] :'.format(iter_counter, list_lambdas[0], list_lambdas[-1]))
-            
-            list_nb_activations = list()
-            for i, lmbda in enumerate(list_lambdas) :   
-                csc_result = self.alphaCSCResult(signal_dict, lmbda)
-                nb_activations = len(csc_result['atoms_idx'])
-                list_nb_activations.append(nb_activations)
-                if verbose :
-                    print('       {} - lmba = {:.2e} : nb_act = {}'.format(i, lmbda, nb_activations))
-
-            last_nnz_index = next((i for i, val in enumerate(list_nb_activations) if val == 0), nb_lambdas) - 1
-            if verbose :
-                print('   >>> Last non-zero index : {} for {} activations'.format(last_nnz_index, list_nb_activations[last_nnz_index]))
-
-            if list_nb_activations[last_nnz_index] > max_activations :
-                lambda_nnz = list_lambdas[last_nnz_index]
-                lambda_zero = list_lambdas[last_nnz_index+1]
-                list_lambdas = np.logspace(np.log10(lambda_nnz), np.log10(lambda_zero), nb_lambdas)
-            else :
-                break
-        if verbose :
-            print('Optimal lambda for {} activations : {}'.format(list_nb_activations[last_nnz_index], lambda_nnz))
-        return lambda_nnz, list_nb_activations[last_nnz_index]
-    
-    def alphaCSCAutoCalibrationResult(self, signal_dict:dict, nb_activations:int, verbose=False) :
-        """
-        Calibrate the alphaCSC algorithm with the best lambda
-        Returns:
-            lambda_nnz : the lambda corresponding to the last number of non-zero activation
-            list_nb_activations[last_nnz_index] : the number of activations corresponding to the last number of non-zero activation
-        """
-        nb_lambdas = 10
-        max_activations = 100
-        list_lambdas = np.logspace(-4, 3, nb_lambdas)
-        lambda_nnz = None
-        # Find the lambda that gives a number of activations less than max_activations
-        iter_counter = 0
-        csc_results = []
-        while True :
-            iter_counter += 1  
-            if verbose : 
-                print('    Calibration interval n°{} [{:.2e}, {:.2e}] :'.format(iter_counter, list_lambdas[0], list_lambdas[-1]))
-            
-            list_nb_activations = list()
-            for i, lmbda in enumerate(list_lambdas) :   
-                csc_result = self.alphaCSCResult(signal_dict, lmbda)
-                csc_results.append(csc_result)
-                nb_activations = len(csc_result['atoms_idx'])
-                list_nb_activations.append(nb_activations)
-                if verbose :
-                    print('       {} - lmba = {:.2e} : nb_act = {}'.format(i, lmbda, nb_activations))
-
-            last_nnz_index = next((i for i, val in enumerate(list_nb_activations) if val == 0), nb_lambdas) - 1
-            if verbose :
-                print('   >>> Last non-zero index : {} for {} activations'.format(last_nnz_index, list_nb_activations[last_nnz_index]))
-
-            if list_nb_activations[last_nnz_index] > max_activations :
-                lambda_nnz = list_lambdas[last_nnz_index]
-                lambda_zero = list_lambdas[last_nnz_index+1]
-                list_lambdas = np.logspace(np.log10(lambda_nnz), np.log10(lambda_zero), nb_lambdas)
-            else :
-                break
-        if verbose :
-            print('Optimal lambda for {} activations : {}'.format(list_nb_activations[last_nnz_index], lambda_nnz))
-        
-        optimal_result = csc_results[last_nnz_index]
-        return optimal_result
-
-    def alphaCSCCalibrationPerSNR(self, db_signals:str, snr:int, nb_signals:int, verbose:bool=False) :
-        """
-        Calibrate the alphaCSC algorithm with the lambda corresponding to the nb of atoms
-        """
-        assert nb_signals <= 1000, "The number of signals must be less than 1000"
-
-        with open(db_signals, 'r') as json_file:
-            data = json.load(json_file)
-            if data is None:
-                raise ValueError("The input file is empty or does not contain any data.")
-            
-        signals = data['signals']
-        signals = [signal for signal in signals if signal['snr'] == snr]
-        signals = signals[:nb_signals]
-
-        listOptLambdas = []
-
-        for i, signal_dict in enumerate(signals):
-            opt_lambda, nb_activations = self.alphaCSCGetOptimalLambda(signal_dict, verbose=verbose)
-            listOptLambdas.append(opt_lambda)
-            if verbose :
-                print(f'Signal {i} : lambda = {opt_lambda} for {nb_activations} activations')
-
-        lambda_opt = np.max(listOptLambdas)
-        if verbose :
-            print(f'Optimal lambda for SNR={snr} : {lambda_opt}')
-        return lambda_opt
-
-    def alphaCSCCalibrationPipeline(self, db_filename, verbose:bool=False) :
-        """
-        Calibrate the alphaCSC algorithm with the best lambda for a batch of signal_dicts.
-        Args:
-            db_filename (str): The name of the input file containing the signals database
-            verbose (bool, optional): Whether to print calibration details. Defaults to False.
-        Returns:
-            Tuple[List[float], List[float]]: The list of best lambdas and the corresponding list of best MSEs.
-        """
-        with open(db_filename, 'r') as json_file:
-            data = json.load(json_file)
-        
-        # Extract the signals from the DB
-        signals = data['signals']
-        
-        list_best_lmbda = []
-        list_best_mse = []
-        
-        for signal_dict in signals:
-            best_lmbda, best_mse = self.alphaCSCCalibration(signal_dict, verbose=verbose)
-            list_best_lmbda.append(best_lmbda)
-            list_best_mse.append(best_mse)
-        
-        return list_best_lmbda, list_best_mse
-
-    def alphaCSCPipeline(self, db_filename, verbose:bool=False) :
-        """
-        Create a pipeline of alphaCSC l1-algorithm from the database of signals.
-        """
-        with open(db_filename, 'r') as json_file:
-            data = json.load(json_file)
-            if data is None:
-                raise ValueError("The input file is empty or does not contain any data.")
-        
-        if verbose :
-            print(f"MMP-DF Pipeline from {db_filename} with {len(data['signals'])} signals")
-
-        # Extract the signals from the DB
-        signals = data['signals']
-        snr_level = 15
-        signal_dict = next((signal for signal in signals if signal['snr'] == snr_level), None)
-
-        csc_result = self.alphaCSCResult(signal_dict, verbose=verbose)
-        activations = csc_result['activations']
-        positions_idx = csc_result['positions_idx']
-        atoms_idx = csc_result['atoms_idx']
-
-        atoms_signals = np.array([atom() for atom in self.atoms])
-        approx = oaconvolve(activations.T, atoms_signals.T, mode='full', axes=0).sum(axis=1)
-        
-        if verbose :
-            print(f'Nb positions: {len(positions_idx)}')
-            print(f'Nb atoms: {len(atoms_idx)}')
-
-        plt.plot(signal_dict['signal'], label='Original', color='k', lw=3, alpha=0.5)
-        plt.plot(approx, label='alphaCSC', color='r')
-        plt.legend()
-        plt.title('$\ell_1$-norm CSC Signal Recovery')
-        plt.show()
+        return results
 
