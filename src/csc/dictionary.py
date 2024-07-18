@@ -741,7 +741,7 @@ class ZSDictionary() :
 #                 888                                                         
 #   
 
-    def alphaCSCResultFromDict(self, signal_dict: dict, nb_activations: int, verbose: bool = False, tolerance: float = 30.0) -> dict:
+    def alphaCSCResultFromDict(self, signal_dict: dict, nb_activations: int, verbose: bool = False, tolerance: float = 20.0) -> dict:
         signal = np.array(signal_dict['signal'])
         D = self.getLocalDictionary()
 

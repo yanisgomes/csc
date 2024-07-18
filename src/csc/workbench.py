@@ -2734,15 +2734,54 @@ class CSCWorkbench:
         sparsity_levels = [i+1 for i in range(max_sparsity)]
         sparsityVariationsAtoms = {}
         for candidate_sparsity in sparsity_levels :
-            candidate_atoms = self.dictionary.alphaCSCResultFromDict
+            candidate_atoms = self.dictionary.alphaCSCResultFromDict(signal_dict, nb_activations=candidate_sparsity)
+            candidate_atoms = candidate_atoms[:candidate_sparsity]
+            sparsityVariationsAtoms[candidate_sparsity] = candidate_atoms
 
-        mp_sparVar_results = {
+        alphaCSC_sparVar_results = {
             'id': signal_dict['id'],
             'sparsityLevels': sparsity_levels,
             'atoms': sparsityVariationsAtoms
         }
 
-        return mp_sparVar_results
+        return alphaCSC_sparVar_results
+
+    def alphaCSCSparsityVariationPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, max_sparsity:int=10, verbose:bool=False) :
+        """Create a pipeline of the alphaCSC sparsity variation results from the database of signals
+        Args:
+            input_filename (str): The name of the input file containing the signals database
+            output_filename (str): The name of the output file to store the results
+            nb_cores (int): The number of cores to use for parallel processing
+            max_sparsity (int): The maximum sparsity level to consider
+            verbose (bool): The verbosity flag
+        Returns:
+            None : it saves the results in a file
+        """
+        with open(input_filename, 'r') as json_file:
+            data = json.load(json_file)
+            if data is None:
+                raise ValueError("The input file is empty or does not contain any data.")
+        
+        if verbose :
+            print(f"MP sparVar Pipeline from {input_filename} with {len(data['mp'])} signals")
+
+        # Extract the signals from the DB
+        signals = data['signals']
+        # Create the results dictionary
+        results = dict()
+        results['source'] = input_filename
+        results['date'] = get_today_date_str()
+        results['algorithm'] = 'alphaCSC'
+        results['maxSparsity'] = max_sparsity
+        results['dictionary'] = str(self.dictionary)
+
+        # Parallelize the OMP algorithm on the signals from the DB
+        alphaCSC_sparVar_results = Parallel(n_jobs=nb_cores)(delayed(self.computeSparsityVariation_MP)(signal_dict, max_sparsity=max_sparsity, verbose=verbose) for signal_dict in tqdm(signals, desc='alphaCSC sparVar Pipeline from DB'))
+        results['results'] = alphaCSC_sparVar_results
+        # Save the results in a JSON file
+        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
+        if verbose :
+            print(f"alphaCSC sparVar Pipeline results saved in {output_filename}")
 
     #    ______   ______     ______        ______   __         ______     ______  
     #   /\  == \ /\  == \   /\  ___\      /\  == \ /\ \       /\  __ \   /\__  _\ 
