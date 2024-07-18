@@ -3044,6 +3044,3 @@ class CSCWorkbench:
         plt.xlabel('Recall', fontsize=14)
         plt.ylabel('Precision', fontsize=14)
         plt.show()
-
-
-    
