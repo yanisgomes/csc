@@ -1997,71 +1997,6 @@ class CSCWorkbench:
         )
         return ax
     
-    def computeTPFPFNMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
-        """
-        Compute the True Positive, False Positive and False Negative for the given true and approx atoms.
-        """
-        # Get the number of true and approx atoms
-        
-        nb_approx_atoms = len(approx_atoms)
-        nb_true_atoms = len(true_atoms)
-        #true_atoms = true_atoms[:nb_approx_atoms]
-
-        # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
-        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
-
-        # Compute the True Positive, False Positive and False Negative
-        position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
-        tp = sum(1 for error in position_errors if error <= position_error_threshold)
-
-        # False Positives
-        fp = len(approx_atoms) - tp  
-        fp += sparsity - len(approx_atoms)
-
-        # False Negatives
-        fn = nb_true_atoms - tp
-
-        if verbose :
-            print(f'Sparsity = {sparsity} | Position Error Threshold = {position_error_threshold}')
-            for match in matched_atoms :
-                print(f'    t : {match[0]["x"]}  |  a : {match[1]["x"]}  ==> {bool(abs(match[0]["x"] - match[1]["x"]) <= position_error_threshold)}')
-            print(f'    ==> TP : {tp}  |  FP : {fp}  |  FN : {fn} \n')
-            print('\n')
-
-        return tp, fp, fn
-
-    def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
-        """
-        Compute the precision-recall metrics for the given true and approx atoms.
-        """
-        tp, fp, fn = self.computeTPFPFNMetrics(true_atoms, approx_atoms, sparsity, position_error_threshold=position_error_threshold, verbose=verbose)
-
-        # Calculate Precision and Recall
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-
-        return precision, recall
-    
-    def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
-        """
-        Compute the precision-recall metrics for the given true and approx atoms.
-        """
-        # Get the number of true and approx atoms
-        nb_approx_atoms = len(approx_atoms)
-        nb_true_atoms = len(true_atoms)
-
-        # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
-        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
-
-        # Compute the True Positive, False Positive and False Negative
-        position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
-        tp = sum(1 for error in position_errors if error <= position_error_threshold)
-
-        precision = tp / sparsity
-        recall = tp / nb_true_atoms
-
-        return precision, recall
-
     @staticmethod
     def computeMeanPRCurve(all_pr, n_samples):
         """
@@ -2119,6 +2054,59 @@ class CSCWorkbench:
         pr_mean_minus_std = np.c_[prec_mean_minus_std, recall_axis]
 
         return pr_mean, pr_mean_plus_std, pr_mean_minus_std
+    
+    def computeTPFPFNMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
+        """
+        Compute the True Positive, False Positive and False Negative for the given true and approx atoms.
+        """
+        # Get the number of true and approx atoms
+        
+        nb_approx_atoms = len(approx_atoms)
+        nb_true_atoms = len(true_atoms)
+        #true_atoms = true_atoms[:nb_approx_atoms]
+
+        # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
+        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
+
+        # Compute the True Positive, False Positive and False Negative
+        position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
+        tp = sum(1 for error in position_errors if error <= position_error_threshold)
+
+        # False Positives
+        fp = len(approx_atoms) - tp  
+        fp += sparsity - len(approx_atoms)
+
+        # False Negatives
+        fn = nb_true_atoms - tp
+
+        if verbose :
+            print(f'Sparsity = {sparsity} | Position Error Threshold = {position_error_threshold}')
+            for match in matched_atoms :
+                print(f'    t : {match[0]["x"]}  |  a : {match[1]["x"]}  ==> {bool(abs(match[0]["x"] - match[1]["x"]) <= position_error_threshold)}')
+            print(f'    ==> TP : {tp}  |  FP : {fp}  |  FN : {fn} \n')
+            print('\n')
+
+        return tp, fp, fn
+    
+    def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
+        """
+        Compute the precision-recall metrics for the given true and approx atoms.
+        """
+        # Get the number of true and approx atoms
+        nb_approx_atoms = len(approx_atoms)
+        nb_true_atoms = len(true_atoms)
+
+        # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
+        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
+
+        # Compute the True Positive, False Positive and False Negative
+        position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
+        tp = sum(1 for error in position_errors if error <= position_error_threshold)
+
+        precision = tp / sparsity
+        recall = tp / nb_true_atoms
+
+        return precision, recall
 
     def extractPRCurveData_MMPDF(self, mmpdf_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> pd.DataFrame:
         """
@@ -2798,6 +2786,7 @@ class CSCWorkbench:
         """
         prc_results = {}
         n_samples=1000
+        verbose=False
         maxSparsity = np.inf
         maxSparsityArg = np.inf
         for key, value in kwargs.items() :
@@ -2805,6 +2794,8 @@ class CSCWorkbench:
                 n_samples = value
             elif key == 'max_sparsity' :
                 maxSparsityArg = value
+            elif key == 'verbose' :
+                verbose = value
             else :
                 with open(value, 'r') as f:
                     prc_db = json.load(f)
@@ -2814,6 +2805,8 @@ class CSCWorkbench:
 
         # Update the max sparsity level
         maxSparsity = min(maxSparsity, maxSparsityArg)
+        if verbose :
+            print(f'maxSparsity =  {maxSparsity}')
 
         # Extract the precision-recall data for each algorithm
         pr_data = {}
@@ -2902,7 +2895,7 @@ class CSCWorkbench:
         plt.ylabel('Precision', fontsize=14)
         plt.show()
 
-    def plotPRCMMPDFMaxBranchesFromDB(self, **kwargs) :
+    def plotPRCMMPDFFromDB(self, **kwargs) :
         """
         Plot the precision-recall curves from the results of the OMP and MP algorithms
         Args :
@@ -2960,9 +2953,97 @@ class CSCWorkbench:
         plt.ylabel('Precision', fontsize=14)
         plt.show()
 
+    #                                            /$$    /$$                   
+    #                                           | $$   | $$                   
+    #     /$$$$$$$  /$$$$$$   /$$$$$$   /$$$$$$ | $$   | $$ /$$$$$$   /$$$$$$ 
+    #    /$$_____/ /$$__  $$ |____  $$ /$$__  $$|  $$ / $$/|____  $$ /$$__  $$
+    #   |  $$$$$$ | $$  \ $$  /$$$$$$$| $$  \__/ \  $$ $$/  /$$$$$$$| $$  \__/
+    #    \____  $$| $$  | $$ /$$__  $$| $$        \  $$$/  /$$__  $$| $$      
+    #    /$$$$$$$/| $$$$$$$/|  $$$$$$$| $$         \  $/  |  $$$$$$$| $$      
+    #   |_______/ | $$____/  \_______/|__/          \_/    \_______/|__/      
+    #             | $$                                                        
+    #             | $$                                                        
+    #             |__/                                                        
 
-    
+    def getPRCFromSparVarDB(self, sparVar_db_path:str, maxSparsity:int, position_error_threshold:int=10) :
+        """
+        Args :
+        Returns :
+            --------
+            pr_mean : numpy.ndarray
+                A 2D array where the first column contains the mean precision values
+                and the second column contains the corresponding recall values.
+            pr_mean_plus_std : numpy.ndarray
+                A 2D array where the first column contains the mean precision values
+                plus one standard deviation and the second column contains the
+                corresponding recall values.
+            pr_mean_minus_std : numpy.ndarray
+                A 2D array where the first column contains the mean precision values
+                minus one standard deviation and the second column contains the
+                corresponding recall values.
+        """
+        with open(sparVar_db_path, 'r') as f:
+            sparVar_db = json.load(f)
+            sparVar_results = sparVar_db['results']
 
+        pr_results = []
+        for result_dict in sparVar_results :
+            signal_dict = self.signalDictFromId(result_dict['id'])
+            true_atoms = signal_dict['atoms']
+            pr_metrics = []
+            for sparsity in result_dict['sparsityLevels'] :
+                if sparsity > maxSparsity :
+                    break
+                candidate_atoms = result_dict['atoms'][str(sparsity)]
+                precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, sparsity, position_error_threshold)
+                pr_metrics.append([precision, recall])
+            pr_results.append(np.array(pr_metrics))
+
+        pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(pr_results, maxSparsity)
+        return pr_mean, pr_mean_plus_std, pr_mean_minus_std
+
+    def plotPRCFromSparVarDB(self, **kwargs) :
+        """
+        Args :
+        Returns :
+        """
+        verbose = False
+        maxSparsity = 10
+        sparVar_db_paths = {}
+        position_error_threshold = 10
+
+        # Extract the keywords arguments
+        for key, value in kwargs.items() :
+            if key == 'max_sparsity' :
+                maxSparsity = value
+            elif key == 'verbose' :
+                verbose = value
+            elif key == 'position_error_threshold' :
+                position_error_threshold = value
+            else :
+                sparVar_db_paths[key] = value
+
+        if verbose :
+            print(f'Max sparsity = {maxSparsity}')
+            print(f'Position error threshold = {position_error_threshold}')
+
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+
+        for i, (algorithm, path) in enumerate(sparVar_db_paths.items()) :
+            if verbose :
+                print(f'{algorithm} : compute PRC from {path}')
+            color = f'C{i}'
+            pr_mean, pr_mean_plus_std, pr_mean_minus_std = self.getPRCFromSparVarDB(path, maxSparsity, position_error_threshold)
+            CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=color, label=algorithm)
+            CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=color, alpha=0.3)
+            CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color=color, alpha=0.3)
+            plt.fill_between(pr_mean[:, 1], pr_mean_plus_std[:, 0], pr_mean_minus_std[:, 0], alpha=0.1)
+            
+        plt.title('Precision-Recall Curve', fontsize=16)
+        plt.legend(loc='best', title='Algorithms')
+        plt.xlabel('Recall', fontsize=14)
+        plt.ylabel('Precision', fontsize=14)
+        plt.show()
 
 
     
