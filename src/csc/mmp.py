@@ -522,11 +522,10 @@ class MMPTree() :
             mmp_tree_dict[str_path]['delay'] = leaf.getMMPDFComputeTime()
         return mmp_tree_dict
 
-    def buildMMPDFResultItem(self) -> Tuple[str, dict]:
+    def buildMMPDFResultDict(self) -> Tuple[str, dict]:
         """
-        Build the result item of the MMPTree as key : value
-        Key := argmin MSE path
-        Value := {'mse': min_mse, 'atoms': atoms, 'delay': delay}
+        Build the result item of the MMPTree :
+        {'mse': min_mse, 'path': argmin_mse_path_str, 'atoms': argmin_mse_atoms, 'delay': mmpdf_compute_time}
         """
         min_mse = np.inf
         argmin_leaf = None
@@ -542,11 +541,12 @@ class MMPTree() :
 
         mmpdf_result = {
             'mse' : argmin_leaf.getMSE(),
+            'path' : argmin_mse_path_str,
             'atoms' : argmin_leaf.getFullBranchAtoms(),
             'delay' : argmin_leaf.getMMPDFComputeTime()
         }
 
-        return argmin_mse_path_str, mmpdf_result
+        return mmpdf_result
     
     @staticmethod
     def getTreeParamsFromMMPTreeDict(mmp_tree_dict:dict) -> Tuple[int, int]:
