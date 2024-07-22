@@ -19,7 +19,7 @@ from .atoms import ZSAtom
 from .utils import *
 
 class MMPNode:
-    def __init__(self, dictionary, signal:np.ndarray, activation_idx:int=None, parent=None):
+    def __init__(self, dictionary, signal:np.ndarray, dissimilarity_threshold:float=0.8, activation_idx:int=None, parent=None):
         """
         Initialize an MMP node.
 
@@ -79,6 +79,9 @@ class MMPNode:
             self.atom = None
             self.atom_signal = None
             self.atom_info = None
+
+        # Dissimilarity constraint threshold
+        self.dissimilarity_threshold = dissimilarity_threshold
 
         # Compute the atom correlations
         if self.atom_signal is not None :
@@ -167,36 +170,49 @@ class MMPNode:
                 genealogy_str += f' -> {idx}'
         return genealogy_str
 
-    def computeBinaryMaskCorrelation(self, atom_idx:int, atom_pos:int, similarity:float=0.8) -> np.ndarray:
+    def setDissimilarityThreshold(self, threshold:float) :
+        """
+        Set the dissimilarity threshold of the node.
+        """
+        self.dissimilarity_threshold = threshold
+
+    def computeBinaryMaskCorrelation(self, atom_idx:int, atom_pos:int) -> np.ndarray:
         """
         Compute a binary activation mask for the correlation with the dictionary's atoms.
         Args:
             atom_pos (int): The position of the atom in the signal
             atom_idx (int): The index of the atom in the dictionary
-            similarity (float): The similarity threshold
         Returns:
             np.ndarray: The binary mask of the activation
         """
         atom_signal = self.dictionary.getAtoms()[atom_idx].getAtomInSignal(signal_length=self.signal_length, offset=atom_pos)
         correlations_with_atom = self.dictionary.computeCorrelations(atom_signal)/np.linalg.norm(atom_signal)
-        return (correlations_with_atom <= similarity).astype(int)
+        return (correlations_with_atom <= self.dissimilarity_threshold).astype(int)
     
-    def getBinarySimilarityMask(self, similarity:float=0.8) -> np.ndarray:
+    def getBinarySimilarityMask(self) -> np.ndarray:
         """
         Compute the binary similarity mask for the current node wit hitself.
+        The binary similarity mask is a co-disk of the atom correlations.
         """
-        return (self.atom_correlations <= similarity).astype(int)
+        return (self.atom_correlations <= self.dissimilarity_threshold).astype(int)
+
+    def getSimilarityDisk(self) -> np.ndarray:
+        """
+        Compute the binary similarity disk for the current node wit hitself.
+        The binary similarity disk is a disk of the atom correlations.
+        """
+        return (self.atom_correlations > self.dissimilarity_threshold).astype(int)
     
-    def getChildrenMaskedCorrelations(self, similarity:float=0.8) -> np.ndarray:
+    def getChildrenMaskedCorrelations(self) -> np.ndarray:
         signal_correlations = self.dictionary.computeCorrelations(self.residual)/np.linalg.norm(self.residual)
         masked_correlations = signal_correlations.copy()
         for child_node in self.children :
             child_pos, child_idx = child_node.atom_pos, child_node.atom_idx
-            child_binary_mask = self.computeBinaryMaskCorrelation(child_idx, child_pos, similarity)
+            child_binary_mask = self.computeBinaryMaskCorrelation(child_idx, child_pos)
             masked_correlations *= child_binary_mask
         return masked_correlations
     
-    def getChildrenMaskedCorrelations(self, similarity:float=0.8) -> np.ndarray:
+    def getChildrenMaskedCorrelations(self) -> np.ndarray:
         """
         Compute the masked correlations of the children nodes.
         """
@@ -214,7 +230,7 @@ class MMPNode:
         """
         child_masked_correlations = self.getChildrenMaskedCorrelations()
         max_corr_idx = child_masked_correlations.argmax()
-        self.children.append(MMPNode(self.dictionary, self.residual, max_corr_idx, parent=self))
+        self.children.append(MMPNode(self.dictionary, self.residual, self.dissimilarity_threshold, max_corr_idx, parent=self))
         if verbose :
             print(f"    NEW MMPNode : {self.getGenealogyStr()}  +  Node({len(self.children)})")
         return self.children[-1]
@@ -252,15 +268,28 @@ class MMPNode:
             return self.parent.getFullBranchAtoms() + [self.atom_info]  
         else :
             return []
+
+    def getFullBranchPath(self) -> str:
+        """
+        Edit the full-blown path name of the node by concatenating parent nodes recursively.
+        """
+        if not self.isRoot():
+            if self.parent.isRoot() :
+                return f'{self.getChildrenIndex()}'
+            else :
+                return self.parent.getFullBranchPath() + f'-{self.getChildrenIndex()}' 
+        else :
+            return ''
     
 class MMPTree() :
 
-    def __init__(self, dictionary, signal:np.ndarray, sparsity:int, connections:int) :
+    def __init__(self, dictionary, signal:np.ndarray, sparsity:int, connections:int, dissimilarity:float=0.8): 
         self.dictionary = dictionary
         self.signal = signal
         self.sparsity = sparsity
         self.connections = connections
-        self.root = MMPNode(dictionary, signal)
+        self.dissimilarityMMPNode = dissimilarity
+        self.root = MMPNode(dictionary, signal, self.dissimilarityMMPNode)
         # Initialize the tree structure
         self.init_structure()
 
@@ -492,6 +521,32 @@ class MMPTree() :
             mmp_tree_dict[str_path]['atoms'] = leaf.getFullBranchAtoms()
             mmp_tree_dict[str_path]['delay'] = leaf.getMMPDFComputeTime()
         return mmp_tree_dict
+
+    def buildMMPDFResultItem(self) -> Tuple[str, dict]:
+        """
+        Build the result item of the MMPTree as key : value
+        Key := argmin MSE path
+        Value := {'mse': min_mse, 'atoms': atoms, 'delay': delay}
+        """
+        min_mse = np.inf
+        argmin_leaf = None
+        argmin_mse_idx = None
+        for i, leaf in enumerate(self.leaves_nodes) :
+            if leaf.getMSE() <= min_mse :
+                argmin_leaf = leaf
+                argmin_mse_idx = i
+                min_mse = leaf.getMSE()
+
+        argmin_mse_path = self.leaves_paths[argmin_mse_idx]
+        argmin_mse_path_str = '-'.join([str(p) for p in argmin_mse_path])
+
+        mmpdf_result = {
+            'mse' : argmin_leaf.getMSE(),
+            'atoms' : argmin_leaf.getFullBranchAtoms(),
+            'delay' : argmin_leaf.getMMPDFComputeTime()
+        }
+
+        return argmin_mse_path_str, mmpdf_result
     
     @staticmethod
     def getTreeParamsFromMMPTreeDict(mmp_tree_dict:dict) -> Tuple[int, int]:

@@ -163,6 +163,27 @@ class ZSDictionary() :
         if atom is None:
             return []
         return self.atomsSimilarTo(atom, tolerance=tolerance)
+    
+    def correlationFromDicts(self, atom1_dict:dict, atom2_dict:dict, signal_length:int) -> float:
+        """Compute the correlation between two atoms from their parameters
+        Args:
+            atom1_dict (dict): The parameters of the first atom
+            atom2_dict (dict): The parameters of the second atom
+        Returns:
+            float: The correlation between the two atoms
+        """
+        # Build atom1 signal
+        atom1 = ZSAtom.from_dict(atom1_dict)
+        atom1.padBothSides(self.atoms_length)
+        atom1_signal = atom1.getAtomInSignal(signal_length, offset=atom1_dict['x'])
+        
+        # Build atom2 signal
+        atom2 = ZSAtom.from_dict(atom2_dict)
+        atom2.padBothSides(self.atoms_length)
+        atom2_signal = atom2.getAtomInSignal(signal_length, offset=atom2_dict['x'])
+
+        (correlation,) = np.correlate(atom1_signal, atom2_signal, mode='valid')
+        return correlation
 
     def generateTestSignal(self, signal_length, sparsity_level, snr_level) -> np.ndarray:
         """Generate a test signal as a linear combination of the atoms in the dictionary
@@ -653,7 +674,7 @@ class ZSDictionary() :
 #  ,8'         `         `8.`8888. ,8'         `         `8.`8888. 8 8888         
 #  
 
-    def mmpdf(self, signal:np.ndarray, sparsity_level:int, connections_level:int, nb_branches:int, verbose:bool=False) -> Tuple[np.ndarray, List[dict]]:
+    def mmpdf(self, signal:np.ndarray, sparsity_level:int, connections_level:int, dissimilarity:float, nb_branches:int, verbose:bool=False) -> Tuple[np.ndarray, List[dict]]:
         """ Multipath Matching Pursuit algorithm to recover the sparse signal
         Args:
             signal (np.ndarray): The input signal to recover
@@ -662,12 +683,12 @@ class ZSDictionary() :
             np.ndarray: The matrix of the chosen atoms for the signal
             list: The list of dictionaries containing the parameters of each atom
         """
-        mmp_tree = MMPTree(dictionary=self, signal=signal, sparsity=sparsity_level, connections=connections_level)
+        mmp_tree = MMPTree(dictionary=self, signal=signal, sparsity=sparsity_level, connections=connections_level, dissimilarity=dissimilarity)
         mmp_tree.runMMPDF(branches_number=nb_branches, verbose=verbose)
         approx, infos = mmp_tree.getResult()
         return approx, infos
 
-    def mmpdfFromDict(self, signal_dict:dict, connections_level:int, nb_branches:int, verbose:bool=False) -> dict :
+    def mmpdfFromDict(self, signal_dict:dict, connections_level:int, dissimilarity:float, nb_branches:int, verbose:bool=False) -> dict :
         """Recover the sparse signal from a dictionary of the signal
         Args:
             signal_dict (dict): The dictionary of the signal
@@ -678,7 +699,7 @@ class ZSDictionary() :
         signal = signal_dict['signal']
         sparsity_level = len(signal_dict['atoms'])
         # Run the MMPDF algorithm
-        mmp_tree = MMPTree(dictionary=self, signal=signal, sparsity=sparsity_level, connections=connections_level)
+        mmp_tree = MMPTree(dictionary=self, signal=signal, sparsity=sparsity_level, connections=connections_level, dissimilarity=dissimilarity)
         mmp_tree.runMMPDF(branches_number=nb_branches, verbose=verbose)
         mmp_tree_dict = mmp_tree.buildMMPTreeDict()
         mmp_result = {
@@ -688,7 +709,7 @@ class ZSDictionary() :
         }
         return mmp_result
     
-    def mmpdfPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, connections:int=3, branches:int=10, verbose=False) :
+    def mmpdfPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, connections:int=3, dissimilarity:float=0.8, branches:int=10, verbose=False) :
         """Create a pipeline of the OMP algorithm from the database of signals.
         Args:
             input_filename (str): The name of the input file containing the signals database
@@ -704,10 +725,6 @@ class ZSDictionary() :
         if verbose :
             print(f"MMP-DF Pipeline from {input_filename} with {len(data['signals'])} signals")
 
-        # MMP-DF parameters
-        connections = 3
-        nb_branches = 10
-
         # Extract the signals from the DB
         signals = data['signals']
         # Create the results dictionary
@@ -717,6 +734,7 @@ class ZSDictionary() :
         results['algorithm'] = 'Convolutional MMP-DF'
         results['nbBranches'] = branches
         results['connections'] = connections
+        results['dissimilarity'] = dissimilarity
         results['batchSize'] = data['batchSize']
         results['snrLevels'] = data['snrLevels']
         results['signalLength'] = data['signalLength']
@@ -724,7 +742,7 @@ class ZSDictionary() :
         results['dictionary'] = str(self)
 
         # Parallelize the OMP algorithm on the signals from the DB
-        mmpdf_results = Parallel(n_jobs=nb_cores)(delayed(self.mmpdfFromDict)(signal_dict, connections_level=connections, nb_branches=branches, verbose=verbose) for signal_dict in tqdm(signals, desc='MMP-DF Pipeline from DB'))
+        mmpdf_results = Parallel(n_jobs=nb_cores)(delayed(self.mmpdfFromDict)(signal_dict, connections_level=connections, dissimilarity=dissimilarity, nb_branches=branches, verbose=verbose) for signal_dict in tqdm(signals, desc='MMP-DF Pipeline from DB'))
         results['mmp'] = mmpdf_results
         # Save the results in a JSON file
         json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)

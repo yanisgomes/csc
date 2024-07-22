@@ -402,104 +402,6 @@ class CSCWorkbench:
 #  ,8'         `         `8.`8888. ,8'         `         `8.`8888. 8 8888         
 #  
     
-    def plotMMPTree(self, db_path:str, id:int) -> None :
-
-        """
-        Plot the MMP Tree leaves' approximations.
-        """
-        # Load the data
-        with open(db_path, 'r') as f:
-            output_data = json.load(f)
-            mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
-        # Get the true signal
-        signal_dict = self.signalDictFromId(id)
-        mmp_tree_dict = mmp_result_dict['mmp-tree']
-
-        # Plot the comparison
-        fig, axs = plt.subplots(len(mmp_tree_dict)+1, 1, figsize=(12, 2*(len(mmp_tree_dict)+1)), sharex=True)
-        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
-            
-        for i, (path_str, path_dict) in enumerate(mmp_tree_dict.items()) :
-            atoms_dict = path_dict['atoms']
-            mmp_approx = np.zeros_like(signal_dict['signal'])
-            for atom_dict in atoms_dict :
-                zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['sigma'])
-                zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
-                mmp_approx += atom_signal
-            axs[0].plot(mmp_approx, label='{} = {}'.format(path_str, path_dict['mse']))
-            axs[i+1].plot(mmp_approx, label='{} = {}'.format(path_str, path_dict['mse']))
-            axs[i+1].legend(loc='best')
-            axs[i+1].axis('off')
-
-        axs[0].legend(loc='best')
-        axs[0].axis('off')
-        plt.show()
-
-    def plotMMPComparison(self, mmpdf_db_path:str, id:int) -> None :
-        """
-        Use three subplots to compare the results between the OMP and the MMP results.
-        The OMP result corresponds to the first branch of the MMP tree.
-        The MMP result corresponds to the MSE-argmin of the MMP tree.
-        """
-        # Load the data
-        with open(mmpdf_db_path, 'r') as f:
-            output_data = json.load(f)
-            mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
-        
-        # Get the true signal
-        signal_dict = self.signalDictFromId(id)
-        true_atoms = signal_dict['atoms']
-        true_signal = np.zeros_like(signal_dict['signal'])
-        for atom_dict in true_atoms :
-            zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['s'])
-            zs_atom.padBothSides(self.dictionary.getAtomsLength())
-            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
-            true_signal += atom_signal
-
-        fig, axs = plt.subplots(3, 1, figsize=(12, 3*3), sharex=True)
-        axs[0].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
-        
-        # Find the OMP and the MMP dict
-        min_mse = np.inf
-        mmp_dict = None
-        mmp_path = None
-        mmp_tree_dict = mmp_result_dict['mmp-tree']
-
-
-        for path_str, leaf_dict in mmp_tree_dict.items() :
-            if all(c == '1' for c in path_str.split('-')) :
-                omp_dict = leaf_dict
-            if leaf_dict['mse'] <= min_mse :
-                mmp_dict = leaf_dict
-                min_mse = leaf_dict['mse']
-                mmp_path = path_str
-
-        # Extract the atoms from the dict
-        results_dict = [omp_dict, mmp_dict]
-        results_name = ['OMP', f'MMP {mmp_path}']
-        # Plot the comparison
-        for i, result_dict in enumerate(results_dict) :
-            approx = np.zeros_like(signal_dict['signal'])
-            atoms_dict = result_dict['atoms']
-            for atom_dict in atoms_dict :
-                zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['s'])
-                zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
-                approx += atom_signal
-            axs[0].plot(approx, color=f'C{i}', label=results_name[i])
-            axs[i+1].plot(true_signal, color='g')
-            axs[i+1].plot(approx, color=f'C{i}')
-            axs[i+1].plot(signal_dict['signal'], color='k', alpha=0.4, lw=3)
-            axs[i+1].set_title('{} : MSE = {}'.format(results_name[i], result_dict["mse"]), fontsize=12)
-            axs[0].legend(loc='best')
-            axs[i+1].axis('off')  
-            
-        axs[0].legend(loc='best') 
-        axs[0].axis('off')
-        plt.suptitle(f'OMP and MMP comparison on signal n°{id}', fontsize=14)
-        plt.show()
-
     def plotMMPComparison(self, mmpdf_db_path:str, id:int) -> None :
         """
         Use three subplots to compare the results between the OMP and the MMP results.
@@ -1805,6 +1707,219 @@ class CSCWorkbench:
 # 8 8888    8888     ,88' .888888888. `88888. `8b.  ;8.`8888 `8b.  ;8.`8888 8 8888         
 # 8 8888     `8888888P'  .8'       `8. `88888. `Y8888P ,88P'  `Y8888P ,88P' 8 8888         
 
+    def plotAtomsPosisitonMatchingFromId(self, mmpdf_db_path:str, id:int) -> None :
+
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_result_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+
+        # Get the true signal
+        signal_dict = self.signalDictFromId(id)
+        true_atoms = signal_dict['atoms']
+
+        # Find the OMP and the MMP dict
+        min_mse = np.inf
+        mmp_dict = None
+        mmp_path = None
+        mmp_tree_dict = mmp_result_dict['mmp-tree']
+
+        for path_str, leaf_dict in mmp_tree_dict.items() :
+            if all(c == '1' for c in path_str.split('-')) :
+                omp_dict = leaf_dict
+            if leaf_dict['mse'] <= min_mse :
+                mmp_dict = leaf_dict
+                min_mse = leaf_dict['mse']
+                mmp_path = path_str
+
+        # Extract the atoms from the dict
+        results_dict = [omp_dict, mmp_dict]
+        results_name = ['OMP', f'MMP {mmp_path}']
+
+        fig, axs = plt.subplots(len(true_atoms), 2, figsize=(15,3*len(true_atoms)), sharex=True)
+
+        omp_matched_atoms = self.computeMatchingPosition(true_atoms, omp_dict['atoms'])
+        mmp_matched_atoms = self.computeMatchingPosition(true_atoms, mmp_dict['atoms'])
+
+        for i, (omp_matching, mmp_matching) in enumerate(zip(omp_matched_atoms, mmp_matched_atoms)) :
+            true_atom, omp_atom = omp_matching
+            true_atom, mmp_atom = mmp_matching
+
+            corr_omp = self.dictionary.correlationFromDicts(true_atom, omp_atom, len(signal_dict['signal']))
+            corr_mmp = self.dictionary.correlationFromDicts(true_atom, mmp_atom, len(signal_dict['signal']))
+
+            # Build the true atom signal
+            zs_true_atom = ZSAtom.from_dict(true_atom)
+            zs_true_atom.padBothSides(self.dictionary.getAtomsLength())
+            true_atom_signal = zs_true_atom.getAtomInSignal(len(signal_dict['signal']), true_atom['x'])
+
+            # Build the OMP atom signal
+            zs_omp_atom = ZSAtom.from_dict(omp_atom)
+            zs_omp_atom.padBothSides(self.dictionary.getAtomsLength())
+            omp_atom_signal = zs_omp_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
+
+            # Build the MMP atom signal
+            zs_mmp_atom = ZSAtom.from_dict(mmp_atom)
+            zs_mmp_atom.padBothSides(self.dictionary.getAtomsLength())
+            mmp_atom_signal = zs_mmp_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
+
+            # Compute the OMP correlation with the true signal
+            (omp_correlation,) = np.correlate(true_atom_signal, omp_atom_signal, mode='valid')
+            axs[i, 0].plot(true_atom_signal, label=f'True atom at x={true_atom["x"]}', color='g', lw=2, alpha=0.5)
+            axs[i, 0].plot(omp_atom_signal, label=f'OMP atom at x={omp_atom["x"]}', color='b', lw=1)
+            axs[i, 0].set_title(f'Atoms matching correlation = {omp_correlation}')
+            axs[i, 0].legend(loc='best')
+            axs[i, 0].axis('off')
+
+            # Compute the MMP correlation with the true signal
+            (mmp_correlation,) = np.correlate(true_atom_signal, mmp_atom_signal, mode='valid')
+            axs[i, 1].plot(true_atom_signal, label=f'True atom at {true_atom["x"]}', color='g', lw=2, alpha=0.5)
+            axs[i, 1].plot(mmp_atom_signal, label=f'MMP atom at {mmp_atom["x"]}', color='r', lw=1)
+            axs[i, 1].set_title(f'Atoms matching correlation = {mmp_correlation}')
+            axs[i, 1].legend(loc='best')
+            axs[i, 1].axis('off')
+
+        plt.axis('off')
+        plt.show()
+
+    def computeCorrelationMatchingData(self, mmpdf_db_path:str) -> Dict:
+        """
+        Compute the position errors for all the signal on a MMPDF database
+        """
+        # Load the data
+        with open(mmpdf_db_path, 'r') as f:
+            output_data = json.load(f)
+
+        data_errors = {
+            'algorithm':[] ,
+            'signal_id': [],
+            'signal_snr': [],
+            'signal_sparsness': [],
+            'atoms_position_error': [],
+            'atoms_correlation' : []
+        }
+        # Iterate over the outputs
+        for result in output_data['mmp'] :
+
+            # Get signal and approximation atoms
+            signal_id = result['id']
+            signal_dict = self.signalDictFromId(signal_id)
+            true_atoms = signal_dict['atoms']
+
+            # Get the MMPTree dict
+            mmp_tree_dict = result['mmp-tree']
+            # Find the OMP and the MMP dict
+            min_mse = np.inf
+            mmp_dict = None
+            mmp_path = None
+            for path_str, leaf_dict in mmp_tree_dict.items() :
+                if all(c == '1' for c in path_str.split('-')) :
+                    omp_dict = leaf_dict
+                if leaf_dict['mse'] <= min_mse :
+                    mmp_dict = leaf_dict
+                    min_mse = leaf_dict['mse']
+                    mmp_path = path_str
+
+            omp_matched_atoms = self.computeMatchingPosition(true_atoms, omp_dict['atoms'])
+            mmp_matched_atoms = self.computeMatchingPosition(true_atoms, mmp_dict['atoms'])
+
+            for i, (omp_matching, mmp_matching) in enumerate(zip(omp_matched_atoms, mmp_matched_atoms)) :
+                true_atom, omp_atom = omp_matching
+                true_atom, mmp_atom = mmp_matching
+
+                # OMP Metrics
+                omp_corr = self.dictionary.correlationFromDicts(true_atom, omp_atom, len(signal_dict['signal']))
+                omp_position_error = np.abs(true_atom['x'] - omp_atom['x'])
+
+                # MMP Metrics
+                mmp_corr = self.dictionary.correlationFromDicts(true_atom, mmp_atom, len(signal_dict['signal']))
+                mmp_position_error = np.abs(true_atom['x'] - mmp_atom['x'])
+
+                # Append the data for OMP
+                data_errors['algorithm'].append('OMP')
+                data_errors['signal_id'].append(signal_id)
+                data_errors['signal_snr'].append(signal_dict['snr'])
+                data_errors['signal_sparsness'].append(result['sparsity'])
+                data_errors['atoms_position_error'].append(omp_position_error)
+                data_errors['atoms_correlation'].append(omp_corr)
+
+                # Append the data for MMP
+                data_errors['algorithm'].append('MMP')
+                data_errors['signal_id'].append(signal_id)
+                data_errors['signal_snr'].append(signal_dict['snr'])
+                data_errors['signal_sparsness'].append(result['sparsity'])
+                data_errors['atoms_position_error'].append(mmp_position_error)
+                data_errors['atoms_correlation'].append(mmp_corr)
+
+        return data_errors
+
+    def boxplotAtomCorrelationMatching(self, mmpdf_db_path:str, **kwargs) :
+        """
+        Plot the boxplot of the position errors.
+        """
+        plt.figure(figsize=(12, 8)) 
+        legend_title = 'Algorithm'
+        matching_data = self.computeCorrelationMatchingData(mmpdf_db_path)
+        df = pd.DataFrame(matching_data)
+        df = df.loc[df['signal_snr'] >= 0]
+        for key, value in kwargs.items():
+            if 'sparsity' in key.lower() or 'sparseness' in key.lower() :
+                df = df.loc[df['signal_sparsness'] == value]
+                legend_title += f' + sparsity={value} '
+                
+        sns.boxplot(x='signal_snr', y='atoms_correlation', hue='algorithm', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
+        sns.despine(trim=True)
+        plt.title(f'Correlation between matched atoms', fontsize=14)
+        plt.xlabel('Signal to Noise Ratio (SNR) in dB', fontsize=12)
+        plt.ylabel('Sparsity', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.legend(title=legend_title, loc='best')
+        plt.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)  # Set grid with partial transparency
+        plt.show()
+
+    def boxplotAtomPosErrorMatching(self, mmpdf_db_path:str, **kwargs) :
+        """
+        Plot the boxplot of the position errors.
+        """
+        plt.figure(figsize=(12, 8)) 
+        legend_title = 'Algorithm'
+        matching_data = self.computeCorrelationMatchingData(mmpdf_db_path)
+        df = pd.DataFrame(matching_data)
+        df = df.loc[df['signal_snr'] >= 0]
+        for key, value in kwargs.items():
+            if 'sparsity' in key.lower() or 'sparseness' in key.lower() :
+                df = df.loc[df['signal_sparsness'] == value]
+                legend_title += f' + sparsity={value} '
+                
+        sns.boxplot(x='signal_snr', y='atoms_position_error', hue='algorithm', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
+        sns.despine(trim=True)
+        plt.title(f'Position error between matched atoms', fontsize=14)
+        plt.xlabel('Signal to Noise Ratio (SNR) in dB', fontsize=12)
+        plt.ylabel('Sparsity', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.legend(title=legend_title, loc='best')
+        plt.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)  # Set grid with partial transparency
+        plt.show()
+        
+    def plotPosErrAtStep(self, db_path:str, step:int) :
+        """
+        Plot the boxplot of the position errors.
+        """
+        plt.figure(figsize=(12, 8)) 
+        data_errors = self.computeOMPPositionErrorsPerStep(db_path)
+        df_all_steps = pd.DataFrame(data_errors)
+        df = df_all_steps.loc[df_all_steps['algo_step'] == step]
+        sns.boxplot(x='snr', y='pos_err', hue='sparsity', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
+        sns.despine(trim=True)
+        plt.title(f'Position errors by SNR and sparsity at step = {step}', fontsize=14)
+        plt.xlabel('Signal to Noise Ratio (SNR) in dB', fontsize=12)
+        plt.ylabel('Sparsity', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.legend(title='Sparsity', loc='best')
+        plt.show()
+
     def plotSignalOverlapFromId(self, id:int) -> None :
         """
         Plot the signal with a conditional coloring according to the overlap vector.
@@ -1910,20 +2025,15 @@ class CSCWorkbench:
 
         # Plot the comparison
         for i, result_dict in enumerate(results_dict) :
-            approx = np.zeros_like(signal_dict['signal'])
-            atoms_dict = result_dict['atoms']
-            for atom_dict in atoms_dict :
-                zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['s'])
-                zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
-                approx += atom_signal
-            axs[i+1].plot(signal_dict['signal'], label='Noisy signal', color='k', alpha=0.4, lw=3)
-            axs[i+1].plot(true_signal, color='g', label='True signal')
+            approx, _ = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], result_dict['atoms'])
             axs[0].plot(approx, color=f'C{i}', label=results_name[i])
-            axs[i+1].plot(approx, color=f'C{i}', label=results_name[i])
-            axs[i+1].set_title('       {} : MSE = {:.2e}'.format(results_name[i], result_dict["mse"]), fontsize=14, loc='left')
-            axs[i+1].legend(loc='best')
+            axs[i+1].plot(true_signal, color='g')
+            axs[i+1].plot(approx, color=f'C{i}')
+            axs[i+1].plot(signal_dict['signal'], color='k', alpha=0.4, lw=3)
+            axs[i+1].set_title('{} : MSE = {}'.format(results_name[i], result_dict["mse"]), fontsize=12)
+            axs[0].legend(loc='best')
             axs[i+1].axis('off')  
+
         axs[0].set_title('       True signal', fontsize=14, loc='left')
         axs[0].legend(loc='best') 
         axs[0].axis('off')
@@ -2138,7 +2248,7 @@ class CSCWorkbench:
 
         return tp, fp, fn
     
-    def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
+    def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, correlation_threshold:int=-1, verbose:bool=False) -> Tuple:
         """
         Compute the precision-recall metrics for the given true and approx atoms.
         """
@@ -2151,7 +2261,8 @@ class CSCWorkbench:
 
         # Compute the True Positive, False Positive and False Negative
         position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
-        tp = sum(1 for error in position_errors if error <= position_error_threshold)
+        correlations = [self.dictionary.correlationFromDicts(true_atom, approx_atom, self.signals_length) for true_atom, approx_atom in matched_atoms]
+        tp = sum(1 for position_error, correlation in zip(position_errors, correlations) if position_error <= position_error_threshold and correlation > correlation_threshold)
 
         precision = tp / sparsity
         recall = tp / nb_true_atoms
@@ -2306,6 +2417,10 @@ class CSCWorkbench:
         precisions = []
         recalls = []
 
+        if verbose :
+            for atom in true_atoms :
+                print(atom)
+
         # Iterate over the attended sparsity levels
         sparsity_levels = [i+1 for i in range(max_sparsity)]
         for candidate_sparsity in sparsity_levels :
@@ -2313,6 +2428,10 @@ class CSCWorkbench:
             precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20)
             precisions.append(precision)
             recalls.append(recall)
+            if verbose :
+                print(f'    Sparsity = {candidate_sparsity} | Precision = {precision} | Recall = {recall}')
+                for cand_atom in candidate_atoms :
+                    print(cand_atom)
 
         mmpdf_pr_results = {
             'id': signal_dict['id'],
@@ -2821,6 +2940,40 @@ class CSCWorkbench:
         if verbose :
             print(f"alphaCSC sparVar Pipeline results saved in {output_filename}")
 
+    def plotAlphaCSCDecomposition(self, signal_dict:dict, sparsity:int, verbose:bool=False) :
+        """
+        Plot the alphaCSC decomposition of a signal
+        Args :
+            signal_dict (dict) : The signal dictionary
+            sparsity (int) : The sparsity level
+            verbose (bool) : The verbosity flag
+        """
+        # Retrieve the signal from the datas
+        signal = signal_dict['signal']
+        atoms = self.dictionary.alphaCSCResultFromDict(signal_dict, nb_activations=sparsity)
+        atoms = atoms[:sparsity]
+
+        if verbose :
+            print(f"plot alphaCSC decomposition for {signal_dict['id']} with {sparsity} atoms")
+
+        # Create the plot
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+        ax.plot(signal, label='Noisy signal', color='k', lw=3, alpha=0.4)
+
+        approx = np.zeros_like(signal)
+        offset = max(np.abs(np.array(signal))) * 0.7
+        for i, atom in enumerate(atoms) :
+            zs_atom = ZSAtom.from_dict(atom)
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = zs_atom.getAtomInSignal(signal_length=len(signal), offset=atom['x'])
+            approx += atom_signal
+            ax.plot(atom_signal - (i+1)*offset, label=f'Atom n°{i+1}', alpha=0.7)
+        
+        ax.plot(approx, label='Approx')
+        plt.title(f'alphaCSC Decomposition with {sparsity} atoms', fontsize=16)
+        plt.legend(loc='best', title='Components')
+        plt.show()
+
     #    ______   ______     ______        ______   __         ______     ______  
     #   /\  == \ /\  == \   /\  ___\      /\  == \ /\ \       /\  __ \   /\__  _\ 
     #   \ \  _-/ \ \  __<   \ \ \____     \ \  _-/ \ \ \____  \ \ \/\ \  \/_/\ \/ 
@@ -3015,7 +3168,7 @@ class CSCWorkbench:
     #             | $$                                                        
     #             |__/                                                        
 
-    def getPRCFromSparVarDB(self, sparVar_db_path:str, maxSparsity:int, position_error_threshold:int=10) :
+    def getPRCFromSparVarDB(self, sparVar_db_path:str, snr_criteria:int, sparsity_criteria:int, maxSparsity:int, position_error_threshold:int=10, correlation_threshold:float=-1, verbose:bool=False) :
         """
         Args :
         Returns :
@@ -3036,18 +3189,32 @@ class CSCWorkbench:
             sparVar_db = json.load(f)
             sparVar_results = sparVar_db['results']
 
+        def signal_condition(signal_snr, signal_sparsity, verbose:bool=False) :
+            if sparsity_criteria == -1 and snr_criteria == -1 :
+                return True
+            elif sparsity_criteria == -1 and snr_criteria != -1 :
+                return (signal_snr == snr_criteria)
+            elif sparsity_criteria != -1 and snr_criteria == -1 :
+                return (signal_sparsity == sparsity_criteria)
+            else :
+                return (signal_sparsity == sparsity_criteria) and (signal_snr == snr_criteria)
+
         pr_results = []
         for result_dict in sparVar_results :
-            signal_dict = self.signalDictFromId(result_dict['id'])
-            true_atoms = signal_dict['atoms']
-            pr_metrics = []
-            for sparsity in result_dict['sparsityLevels'] :
-                if sparsity > maxSparsity :
-                    break
-                candidate_atoms = result_dict['atoms'][str(sparsity)]
-                precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, sparsity, position_error_threshold)
-                pr_metrics.append([precision, recall])
-            pr_results.append(np.array(pr_metrics))
+            signal_dict = self.signalDictFromId(id=result_dict['id'])
+            if signal_condition(signal_dict['snr'], signal_dict['sparsity'], verbose) and signal_dict['snr'] >= 0 :
+                true_atoms = signal_dict['atoms']
+                pr_metrics = []
+                for spar in result_dict['sparsityLevels'] :
+                    if spar > maxSparsity :
+                        break
+                    candidate_atoms = result_dict['atoms'][str(spar)]
+                    precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, spar, position_error_threshold, correlation_threshold)
+                    pr_metrics.append([precision, recall])
+                pr_results.append(np.array(pr_metrics))
+
+        if verbose :
+            print(f'    -> {sparVar_db_path} : {len(pr_results)} arrays of PR metrics')
 
         pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(pr_results, maxSparsity)
         return pr_mean, pr_mean_plus_std, pr_mean_minus_std
@@ -3057,25 +3224,37 @@ class CSCWorkbench:
         Args :
         Returns :
         """
+        snr_criteria = -1
+        sparsity_criteria = -1
         verbose = False
         maxSparsity = 10
         sparVar_db_paths = {}
         position_error_threshold = 10
+        correlation_threshold = -1
 
         # Extract the keywords arguments
         for key, value in kwargs.items() :
-            if key == 'max_sparsity' :
+            if key =='sparsity' :
+                sparsity_criteria = value
+            elif key == 'snr' :
+                snr_criteria = value
+            elif key == 'max_sparsity' :
                 maxSparsity = value
             elif key == 'verbose' :
                 verbose = value
             elif key == 'position_error_threshold' :
                 position_error_threshold = value
+            elif key == 'correlation_threshold' :
+                correlation_threshold = value
             else :
                 sparVar_db_paths[key] = value
 
-        if verbose :
+        if verbose :    
+            print(f'SNR = {snr_criteria}')
+            print(f'Sparsity = {sparsity_criteria}')
             print(f'Max sparsity = {maxSparsity}')
             print(f'Position error threshold = {position_error_threshold}')
+            print(f'Correlation threshold = {correlation_threshold}')
 
         fig, ax = plt.subplots(1, 1, figsize=(8, 8))
 
@@ -3083,14 +3262,21 @@ class CSCWorkbench:
             if verbose :
                 print(f'{algorithm} : compute PRC from {path}')
             color = f'C{i}'
-            pr_mean, pr_mean_plus_std, pr_mean_minus_std = self.getPRCFromSparVarDB(path, maxSparsity, position_error_threshold)
+            pr_mean, pr_mean_plus_std, pr_mean_minus_std = self.getPRCFromSparVarDB(path, snr_criteria, sparsity_criteria, maxSparsity, position_error_threshold, correlation_threshold, verbose)
             CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=color, label=algorithm)
             CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=color, alpha=0.3)
             CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color=color, alpha=0.3)
             plt.fill_between(pr_mean[:, 1], pr_mean_plus_std[:, 0], pr_mean_minus_std[:, 0], alpha=0.1)
 
+        legend_title = str()
+        if snr_criteria != -1 and sparsity_criteria != -1 :
+            legend_title = f'SNR={snr_criteria} & Sparsity={sparsity_criteria}'
+        elif snr_criteria != -1 and sparsity_criteria == -1:
+            legend_title = f'SNR={snr_criteria}'
+        elif snr_criteria == -1 and sparsity_criteria != -1 :
+            legend_title = f'Sparsity={sparsity_criteria}'
         plt.title(f'Precision-Recall Curve : position_error_threshold = {position_error_threshold}', fontsize=16)
-        plt.legend(loc='best', title='Algorithms')
+        plt.legend(loc='best', title=legend_title)
         plt.xlabel('Recall', fontsize=14)
         plt.ylabel('Precision', fontsize=14)
         plt.show()
