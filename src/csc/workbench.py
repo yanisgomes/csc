@@ -1781,6 +1781,35 @@ class CSCWorkbench:
         plt.axis('off')
         plt.show()
 
+    def plotAtomsPosisitonMatchingFromDicts(self, signal_dict, true_atoms, approx_atoms, position_error_threshold:int=20, correlation_threshold:int=-1, verbose:bool=True) -> None :
+        
+        fig, axs = plt.subplots(len(true_atoms), 1, figsize=(15,3*len(true_atoms)), sharex=True)
+
+        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)        
+
+        for i, (true_atom, approx_atom) in enumerate(matched_atoms) :
+
+            # Build the true atom signal
+            zs_true_atom = ZSAtom.from_dict(true_atom)
+            zs_true_atom.padBothSides(self.dictionary.getAtomsLength())
+            true_atom_signal = zs_true_atom.getAtomInSignal(len(signal_dict['signal']), true_atom['x'])
+
+            # Build the approx atom signal
+            zs_approx_atom = ZSAtom.from_dict(approx_atom)
+            zs_approx_atom.padBothSides(self.dictionary.getAtomsLength())
+            approx_atom_signal = zs_approx_atom.getAtomInSignal(len(signal_dict['signal']), approx_atom['x'])
+
+            # Compute the correlation with the true signal
+            (corr,) = np.correlate(true_atom_signal, approx_atom_signal, mode='valid')
+            axs[i, 0].plot(true_atom_signal, label=f'True atom at x={true_atom["x"]}', color='g', lw=2, alpha=0.5)
+            axs[i, 0].plot(approx_atom_signal, label=f'Approx atom at x={approx_atom["x"]}', color='b', lw=1)
+            axs[i, 0].set_title(f'Atoms matching correlation = {corr}')
+            axs[i, 0].legend(loc='best')
+            axs[i, 0].axis('off')
+
+        plt.axis('off')
+        plt.show()
+
     def computeCorrelationMatchingData(self, mmpdf_db_path:str) -> Dict:
         """
         Compute the position errors for all the signal on a MMPDF database
@@ -3297,3 +3326,137 @@ class CSCWorkbench:
         plt.xlabel('Recall', fontsize=14)
         plt.ylabel('Precision', fontsize=14)
         plt.show()
+
+
+#         ________  ________  ________  ________  ___      ___ ________  ________     
+#       |\   ____\|\   __  \|\   __  \|\   __  \|\  \    /  /|\   __  \|\   __  \    
+#        \ \  \___|\ \  \|\  \ \  \|\  \ \  \|\  \ \  \  /  / | \  \|\  \ \  \|\  \   
+#         \ \_____  \ \   ____\ \   __  \ \   _  _\ \  \/  / / \ \   __  \ \   _  _\  
+#          \|____|\  \ \  \___|\ \  \ \  \ \  \\  \\ \    / /   \ \  \ \  \ \  \\  \| 
+#            ____\_\  \ \__\    \ \__\ \__\ \__\\ _\\ \__/ /     \ \__\ \__\ \__\\ _\ 
+#           |\_________\|__|     \|__|\|__|\|__|\|__|\|__|/       \|__|\|__|\|__|\|__|
+#           \|_________|                                                              
+                                                                                                                   
+    def computeSparVarMetricsFromDict(self, sparvar_dict:dict, pos_err_threshold:int=20, corr_err_threshold:float=0.75) -> Tuple[List[float], List[float]] :
+        """
+        Compute the precisions-recalls metrics from a sparsity variation dictionary
+        """
+
+        # Initialize the precion-recall lists
+        pr_metrics = []
+
+        # Extract the signal id, snr and results
+        signal_id = sparvar_dict['id']
+        signal_snr = sparvar_dict['snr']
+        results_list = sparvar_dict['results']
+
+        # Get the true atoms from the signal
+        signal_dict = self.signalDictFromId(signal_id)
+        true_atoms = signal_dict['atoms']
+        nb_true_atoms = len(true_atoms)
+
+        # Iterate over the results
+        for result_dict in results_list :
+            
+            approx_atoms = result_dict['atoms']
+            np_approx_atoms = len(approx_atoms)
+
+            # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
+            matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
+
+            # Compute the errors in position and correlation
+            position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
+            correlations = [self.dictionary.correlationFromDicts(true_atom, approx_atom, self.signals_length) for true_atom, approx_atom in matched_atoms]
+            
+            # Compute the true positives, precision and recall
+            tp = sum(1 for position_error, correlation in zip(position_errors, correlations) if position_error <= pos_err_threshold and correlation > corr_err_threshold)
+            precision = tp / np_approx_atoms
+            recall = tp / nb_true_atoms
+
+            pr_metrics.append([precision, recall])
+
+        return np.array(pr_metrics)
+    
+    def computeSparVarMetricsFromDB(self, sparvar_db_path:str, results_key:str, pos_err_threshold:int, corr_err_threshold:float, verbose:bool=False) -> Tuple[List[float], List[float]] :
+        """
+        Compute the precisions-recalls metrics from a sparsity variation database
+        Args :
+            sparvar_db_path (str) : The path to the sparsity variation database
+            results_key (str) : The key of the results in the database
+            pos_err_threshold (int) : The position error threshold
+            corr_err_threshold (float) : The correlation error threshold
+            verbose (bool) : The verbosity flag
+        Returns :
+            pr_mean : numpy.ndarray
+                A 2D array where the first column contains the mean precision values
+                and the second column contains the corresponding recall values.
+            pr_mean_plus_std : numpy.ndarray
+                A 2D array where the first column contains the mean precision values
+                plus one standard deviation and the second column contains the
+                corresponding recall values.
+            pr_mean_minus_std : numpy.ndarray
+                A 2D array where the first column contains the mean precision values
+                minus one standard deviation and the second column contains the
+                corresponding recall values.
+        """
+        with open(sparvar_db_path, 'r') as f:
+            sparvar_db = json.load(f)
+            sparvar_results = sparvar_db[results_key]
+            max_sparsity = sparvar_db['maxSparsityLevel']
+
+
+        pr_results = [] # List of np.array of [precision, recall] metrics
+        for result_dict in sparvar_results :
+            pr_array = self.computeSparVarMetricsFromDict(result_dict, pos_err_threshold, corr_err_threshold)
+            pr_results.append(pr_array)
+
+        pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(pr_results, max_sparsity)
+        return pr_mean, pr_mean_plus_std, pr_mean_minus_std
+
+    def plotPRCurvesFromDB(self, **kwargs) :
+        """
+        Plot the precision-recall curves from the results of the any sparVar database.
+        """
+        pos_err_threshold = 20
+        corr_err_threshold = 0.75
+        sparvar_db_paths = {}
+        verbose = False
+        fill = False
+
+        for key, value in kwargs.items() :
+            if key == 'pos_err_threshold' :
+                pos_err_threshold = value
+            elif key == 'corr_err_threshold' :
+                corr_err_threshold = value
+            elif key == 'verbose' :
+                verbose = value
+            elif key == 'fill' :
+                fill = value
+            else :
+                sparvar_db_paths[key] = value
+
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+
+        for i, (algorithm, path) in enumerate(sparvar_db_paths.items()) :
+            pr_mean, pr_mean_plus_std, pr_mean_minus_std = self.computeSparVarMetricsFromDB(
+                sparvar_db_path = path,
+                results_key = str(algorithm),
+                pos_err_threshold = pos_err_threshold,
+                corr_err_threshold = corr_err_threshold
+                )
+            CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=f'C{i}', label='CSC-'+str(algorithm).upper())
+            CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=f'C{i}', alpha=0.3)
+            CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color=f'C{i}', alpha=0.3)
+            if fill :
+                plt.fill_between(pr_mean[:, 1], pr_mean_plus_std[:, 0], pr_mean_minus_std[:, 0], alpha=0.1)
+
+        plt.title(f'Precision-Recall Curve : pos_err_threshold = {pos_err_threshold} & corr_err_threshold = {corr_err_threshold}', fontsize=16)
+        plt.legend(loc='best', title='Algorithm')
+        plt.xlabel('Recall', fontsize=14)
+        plt.ylabel('Precision', fontsize=14)
+        plt.grid(alpha=0.5)
+        plt.show()
+        
+            
+                                                                                                                                                                                                                    
+                 
