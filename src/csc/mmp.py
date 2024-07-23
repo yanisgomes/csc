@@ -388,12 +388,13 @@ class MMPTree() :
         Run the MMP algorithm with a depth-first strategy.
         """
         assert branches_number > 0, "branches_number must be greater than 0"
-        assert branches_number <= self.connections ** self.sparsity, "branches_number must be less than the number of possible paths"
+        #assert branches_number <= self.connections ** self.sparsity, "branches_number must be less than the number of possible paths"
+        nb_branches = min(branches_number, self.connections ** self.sparsity)
         # Initialize the tree structure
         self.init_structure()
         # Add branches in a serial manner
         branch_counter = 1
-        while len(self.leaves_paths) < branches_number :
+        while len(self.leaves_paths) < nb_branches :
             # Depth-first search for the next path
             next_path = MMPTree.getCandidatePath(self.sparsity, self.connections, len(self.leaves_paths) + 1)
             self.leaves_paths.append(next_path)

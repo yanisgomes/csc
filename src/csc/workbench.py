@@ -2248,6 +2248,23 @@ class CSCWorkbench:
 
         return tp, fp, fn
     
+    def computeTruePositives(self, true_atoms, approx_atoms, position_error_threshold:int=20, correlation_threshold:int=-1, verbose:bool=True) -> int:
+        """
+        Compute the True Positive for the given true and approx atoms.
+        """
+        # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
+        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
+
+        # Compute the True Positive, False Positive and False Negative
+        position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
+        correlations = [self.dictionary.correlationFromDicts(true_atom, approx_atom, self.signals_length) for true_atom, approx_atom in matched_atoms]
+        true_positives = [1 for position_error, correlation in zip(position_errors, correlations) if position_error <= position_error_threshold and correlation > correlation_threshold]
+        if verbose :
+            for match, pos_error, corr in zip(matched_atoms, position_errors, correlations) :
+                print(f'    REAL x={match[0]["x"]} {str(ZSAtom.from_dict(match[0]))}   |  APPROX x={match[1]["x"]} {str(ZSAtom.from_dict(match[1]))}  ==> {bool(pos_error <= position_error_threshold)}  |  {corr}')
+        tp = sum(true_positives)
+        return tp
+    
     def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, correlation_threshold:int=-1, verbose:bool=False) -> Tuple:
         """
         Compute the precision-recall metrics for the given true and approx atoms.
