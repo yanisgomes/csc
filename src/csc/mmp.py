@@ -204,15 +204,6 @@ class MMPNode:
         return (self.atom_correlations > self.dissimilarity_threshold).astype(int)
     
     def getChildrenMaskedCorrelations(self) -> np.ndarray:
-        signal_correlations = self.dictionary.computeCorrelations(self.residual)/np.linalg.norm(self.residual)
-        masked_correlations = signal_correlations.copy()
-        for child_node in self.children :
-            child_pos, child_idx = child_node.atom_pos, child_node.atom_idx
-            child_binary_mask = self.computeBinaryMaskCorrelation(child_idx, child_pos)
-            masked_correlations *= child_binary_mask
-        return masked_correlations
-    
-    def getChildrenMaskedCorrelations(self) -> np.ndarray:
         """
         Compute the masked correlations of the children nodes.
         """

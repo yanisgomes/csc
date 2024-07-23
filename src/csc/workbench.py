@@ -109,7 +109,6 @@ class CSCWorkbench:
             output_data = json.load(f)
             signals_dict= next((item for item in output_data[key] if item['id'] in ids), None)
         return signals_dict
-    
 
     def computeMatchingPosition(self, true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[Tuple[Dict,Dict]]:
         """
@@ -136,8 +135,6 @@ class CSCWorkbench:
         Returns:
             List[Tuple[Dict,Dict]]: List of tuples of matched atoms dict.
         """
-        true_positions = np.array([atom['x'] for atom in true_atoms_dict])
-        approx_positions = np.array([atom['x'] for atom in approx_atoms_dict])
 
         true_atoms = [ZSAtom.from_dict(atom) for atom in true_atoms_dict]
         approx_atoms = [ZSAtom.from_dict(atom) for atom in approx_atoms_dict]
@@ -159,6 +156,49 @@ class CSCWorkbench:
         row_ind, col_ind = optimize.linear_sum_assignment(cost_matrix)
         matched_atoms = [(true_atoms_dict[i], approx_atoms_dict[j]) for i, j in zip(row_ind, col_ind)]
         return matched_atoms
+
+    def computeMaxTruePositives(self, true_atoms:List[Dict], approx_atoms:List[Dict], pos_err_threshold:float, corr_err_threshold:float, verbose:bool=False) -> int:
+        """
+        Compute the maximum number of true positives using the Hungarian algorithm.
+        Args:
+            true_atoms (List[Dict]): Atoms of the true dictionary.
+            approx_atoms (List[Dict]): Atoms of the approximation dictionary.
+            pos_err_threshold (float): Position error threshold for matching.
+            corr_err_threshold (float): Correlation threshold for matching.
+        Returns:
+            int: Maximum number of true positives.
+        """
+        # Extract positions and compute cost matrix for positions
+        true_positions = np.array([atom['x'] for atom in true_atoms])
+        approx_positions = np.array([atom['x'] for atom in approx_atoms])
+        pos_cost_matrix = np.abs(true_positions[:, np.newaxis] - approx_positions)
+
+        # Compute correlation matrix
+        true_signals = []
+        for atom in true_atoms:
+            zs_atom = ZSAtom.from_dict(atom)
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            true_signals.append(zs_atom.getAtomInSignal(self.signals_length, atom['x']))
+        approx_signals = []
+        for atom in approx_atoms:
+            zs_atom = ZSAtom.from_dict(atom)
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            approx_signals.append(zs_atom.getAtomInSignal(self.signals_length, atom['x']))
+        correlation_matrix = np.zeros((len(true_atoms), len(approx_atoms)))
+
+        for i, true_signal in enumerate(true_signals):
+            for j, approx_signal in enumerate(approx_signals):
+                correlation_matrix[i, j] = np.abs(np.correlate(true_signal, approx_signal, mode='valid')[0])
+
+        # Define the cost matrix based on position and correlation thresholds
+        cost_matrix = np.ones_like(pos_cost_matrix)
+        cost_matrix[(pos_cost_matrix <= pos_err_threshold) & (correlation_matrix >= corr_err_threshold)] = 0
+
+        # Compute the optimal matching
+        row_ind, col_ind = optimize.linear_sum_assignment(cost_matrix)
+        max_tp = np.sum(cost_matrix[row_ind, col_ind] == 0)
+
+        return max_tp
 
     def meanPositionError(self, true_atoms:List[Dict], approx_atoms:List[Dict]) -> List[int]:
         """
@@ -2243,179 +2283,7 @@ class CSCWorkbench:
         pr_mean_minus_std = np.c_[prec_mean_minus_std, recall_axis]
 
         return pr_mean, pr_mean_plus_std, pr_mean_minus_std
-    
-    def computeTPFPFNMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, verbose:bool=False) -> Tuple:
-        """
-        Compute the True Positive, False Positive and False Negative for the given true and approx atoms.
-        """
-        # Get the number of true and approx atoms
-        
-        nb_approx_atoms = len(approx_atoms)
-        nb_true_atoms = len(true_atoms)
-        #true_atoms = true_atoms[:nb_approx_atoms]
 
-        # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
-        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
-
-        # Compute the True Positive, False Positive and False Negative
-        position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
-        tp = sum(1 for error in position_errors if error <= position_error_threshold)
-
-        # False Positives
-        fp = len(approx_atoms) - tp  
-        fp += sparsity - len(approx_atoms)
-
-        # False Negatives
-        fn = nb_true_atoms - tp
-
-        if verbose :
-            print(f'Sparsity = {sparsity} | Position Error Threshold = {position_error_threshold}')
-            for match in matched_atoms :
-                print(f'    t : {match[0]["x"]}  |  a : {match[1]["x"]}  ==> {bool(abs(match[0]["x"] - match[1]["x"]) <= position_error_threshold)}')
-            print(f'    ==> TP : {tp}  |  FP : {fp}  |  FN : {fn} \n')
-            print('\n')
-
-        return tp, fp, fn
-    
-    def computeTruePositives(self, true_atoms, approx_atoms, position_error_threshold:int=20, correlation_threshold:int=-1, verbose:bool=True) -> int:
-        """
-        Compute the True Positive for the given true and approx atoms.
-        """
-        # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
-        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
-
-        # Compute the True Positive, False Positive and False Negative
-        position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
-        correlations = [self.dictionary.correlationFromDicts(true_atom, approx_atom, self.signals_length) for true_atom, approx_atom in matched_atoms]
-        true_positives = [1 for position_error, correlation in zip(position_errors, correlations) if position_error <= position_error_threshold and correlation > correlation_threshold]
-        if verbose :
-            for match, pos_error, corr in zip(matched_atoms, position_errors, correlations) :
-                print(f'    REAL x={match[0]["x"]} {str(ZSAtom.from_dict(match[0]))}   |  APPROX x={match[1]["x"]} {str(ZSAtom.from_dict(match[1]))}  ==> {bool(pos_error <= position_error_threshold)}  |  {corr}')
-        tp = sum(true_positives)
-        return tp
-    
-    def computePrecisionRecallMetrics(self, true_atoms, approx_atoms, sparsity, position_error_threshold:int=20, correlation_threshold:int=-1, verbose:bool=False) -> Tuple:
-        """
-        Compute the precision-recall metrics for the given true and approx atoms.
-        """
-        # Get the number of true and approx atoms
-        nb_approx_atoms = len(approx_atoms)
-        nb_true_atoms = len(true_atoms)
-
-        # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
-        matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
-
-        # Compute the True Positive, False Positive and False Negative
-        position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
-        correlations = [self.dictionary.correlationFromDicts(true_atom, approx_atom, self.signals_length) for true_atom, approx_atom in matched_atoms]
-        tp = sum(1 for position_error, correlation in zip(position_errors, correlations) if position_error <= position_error_threshold and correlation > correlation_threshold)
-
-        precision = tp / sparsity
-        recall = tp / nb_true_atoms
-
-        return precision, recall
-
-    def extractPRCurveData_MMPDF(self, mmpdf_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> pd.DataFrame:
-        """
-        Process the MMP-DF results.
-        Args :
-            mmpdf_dict (dict) : The MMP-DF dictionary.
-            signal (np.ndarray) : The signal.
-            max_branches (int) : The maximum number of branches to consider.
-            max_sparsity (int) : The maximum sparsity level to consider.
-        Returns :
-            pd.DataFrame : The precision-recall dataframe.
-        """
-        # Retrieve the tree structure to the max number of branches
-        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches)
-        
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
-        signal = signal_dict['signal']
-        true_atoms = signal_dict['atoms']
-
-        # Initialize the precion-recall dataframe
-        precisions = []
-        recalls = []
-
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms, _ = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, self.dictionary, signal, candidate_sparsity=candidate_sparsity)
-            precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
-            precisions.append(precision)
-            recalls.append(recall)
-
-        precision_recall_df = pd.DataFrame({'sparsity': sparsity_levels, 'precision': precisions, 'recall': recalls})
-        return precision_recall_df
-    
-    def extractPRCurveData_OMP(self, mmpdf_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> pd.DataFrame:
-        """
-        Process the MMP-DF results.
-        Args :
-            mmpdf_dict (dict) : The MMP-DF dictionary.
-            signal (np.ndarray) : The signal.
-            max_branches (int) : The maximum number of branches to consider.
-            max_sparsity (int) : The maximum sparsity level to consider.
-        Returns :
-            pd.DataFrame : The precision-recall dataframe.
-        """
-        # Retrieve the tree structure to the max number of branches
-        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches)
-        
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
-        signal = signal_dict['signal']
-        true_atoms = signal_dict['atoms']
-
-        # Initialize the precion-recall dataframe
-        precisions = []
-        recalls = []
-
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms, _ = MMPTree.ompCandidateFromMMPTreeDict(mmp_tree_dict, self.dictionary, signal, candidate_sparsity=candidate_sparsity)
-            precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
-            precisions.append(precision)
-            recalls.append(recall)
-
-        precision_recall_df = pd.DataFrame({'sparsity': sparsity_levels, 'precision': precisions, 'recall': recalls})
-        return precision_recall_df
-
-    def extractPRCurveData_MP(self, mp_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> pd.DataFrame:
-        """
-        Process the MMP-DF results.
-        Args :
-            mp_dict (dict) : The MMP-DF dictionary.
-            signal (np.ndarray) : The signal.
-            max_branches (int) : The maximum number of branches to consider.
-            max_sparsity (int) : The maximum sparsity level to consider.
-        Returns :
-            pd.DataFrame : The precision-recall dataframe.
-        """
-        # Retrieve the atoms from the MP algorithm output
-        approx_atoms = mp_dict['atoms']
-
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mp_dict['id'])
-        signal = signal_dict['signal']
-        true_atoms = signal_dict['atoms']
-
-        # Initialize the precion-recall dataframe
-        precisions = []
-        recalls = []
-
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms = approx_atoms[:min(candidate_sparsity, len(approx_atoms))]
-            precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20, verbose=verbose)
-            precisions.append(precision)
-            recalls.append(recall)
-
-        precision_recall_df = pd.DataFrame({'sparsity': sparsity_levels, 'precision': precisions, 'recall': recalls})
-        return precision_recall_df
 
     
 #    /$$$$$$$  /$$$$$$$   /$$$$$$        /$$$$$$$  /$$                     /$$ /$$                    
@@ -2429,496 +2297,6 @@ class CSCWorkbench:
 #                                                     | $$                                            
 #                                                     | $$                                            
 #                                                     |__/                                            
-    
-    #       __    __     __    __     ______   _____     ______  
-    #      /\ "-./  \   /\ "-./  \   /\  == \ /\  __-.  /\  ___\ 
-    #      \ \ \-./\ \  \ \ \-./\ \  \ \  _-/ \ \ \/\ \ \ \  __\ 
-    #       \ \_\ \ \_\  \ \_\ \ \_\  \ \_\    \ \____-  \ \_\   
-    #        \/_/  \/_/   \/_/  \/_/   \/_/     \/____/   \/_/   
-    #                                                            
-    
-    def computePRDataFromDict_MMPDF(self, mmpdf_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> dict:
-        """
-        Process the MMP-DF to extract precision-recall data.
-        Args :
-            mmpdf_dict (dict) : The MMP-DF dictionary.
-            max_branches (int) : The maximum number of branches to consider.
-            max_sparsity (int) : The maximum sparsity level to consider.
-            verbose (bool) : The verbosity flag.
-        Returns :
-            dict : The precision-recall data.
-        """
-        # Retrieve the tree structure to the max number of branches
-        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches)
-        
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
-        signal = signal_dict['signal']
-        true_atoms = signal_dict['atoms']
-
-        if verbose :
-            print(f"compute MMP-DF PRC for {signal_dict['id']} with {signal_dict['sparsity']} atoms")
-
-        # Initialize the precion-recall dataframe
-        precisions = []
-        recalls = []
-
-        if verbose :
-            for atom in true_atoms :
-                print(atom)
-
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms, _ = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, self.dictionary, signal, candidate_sparsity=candidate_sparsity)
-            precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20)
-            precisions.append(precision)
-            recalls.append(recall)
-            if verbose :
-                print(f'    Sparsity = {candidate_sparsity} | Precision = {precision} | Recall = {recall}')
-                for cand_atom in candidate_atoms :
-                    print(cand_atom)
-
-        mmpdf_pr_results = {
-            'id': signal_dict['id'],
-            'snr': signal_dict['snr'],
-            'trueSparsity': signal_dict['sparsity'],
-            'sparsityLevels': sparsity_levels,
-            'precisions': precisions,
-            'recalls': recalls
-        }
-
-        return mmpdf_pr_results
-    
-    def mmpdfPrecisonRecallPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, max_branches:int=10, max_sparsity:int=10, verbose=False) :
-        """Create a pipeline of the MMP-DF Precsion-Recall Curves metric from the database of MMP-DF results
-        Args:
-            input_filename (str): The name of the input file containing the signals database
-            output_filename (str): The name of the output file to store the results
-            nb_cores (int): The number of cores to use for parallel processing
-            max_branches (int): The maximum number of branches to consider
-            max_sparsity (int): The maximum sparsity level to consider
-            verbose (bool): The verbosity flag
-        Returns:
-            None : it saves the results in a file
-        """
-        with open(input_filename, 'r') as json_file:
-            data = json.load(json_file)
-            if data is None:
-                raise ValueError("The input file is empty or does not contain any data.")
-        
-        if verbose :
-            print(f"MMP-DF PRC Pipeline from {input_filename} with {len(data['mmp'])} signals")
-
-        # Extract the signals from the DB
-        mmpdf_results = data['mmp']
-        # Create the results dictionary
-        results = dict()
-        results['source'] = input_filename
-        results['date'] = get_today_date_str()
-        results['algorithm'] = 'Precision-recall of convolutional MMP-DF'
-        results['maxBranches'] = max_branches
-        results['maxSparsity'] = max_sparsity
-        results['dictionary'] = str(self)
-
-        # Parallelize the OMP algorithm on the signals from the DB
-        mmpdf_prc_results = Parallel(n_jobs=nb_cores)(delayed(self.computePRDataFromDict_MMPDF)(mmpdf_dict, max_branches=max_branches, max_sparsity=max_sparsity, verbose=verbose) for mmpdf_dict in tqdm(mmpdf_results, desc='MMP-DF PRC Pipeline from DB'))
-        results['prc'] = mmpdf_prc_results
-        # Save the results in a JSON file
-        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
-        if verbose :
-            print(f"MMP-DF PRC Pipeline results saved in {output_filename}")
-
-    def computeSparsityVariation_MMPDF(self, mmpdf_dict:dict, max_branches:int=10, max_sparsity:int=10, verbose:bool=False) -> dict:
-        """
-        Process the MMP-DF to extract precision-recall data.
-        Args :
-            mmpdf_dict (dict) : The MMP-DF dictionary.
-            max_branches (int) : The maximum number of branches to consider.
-            max_sparsity (int) : The maximum sparsity level to consider.
-            verbose (bool) : The verbosity flag.
-        Returns :
-            dict : The precision-recall data.
-        """
-        # Retrieve the tree structure to the max number of branches
-        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches)
-        
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
-        signal = signal_dict['signal']
-
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        sparsityVariationsAtoms = {}
-        sparsityVariationsMSE = {}
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms, min_mse = MMPTree.mmpdfCandidateFromMMPTreeDict(mmp_tree_dict, self.dictionary, signal, candidate_sparsity=candidate_sparsity)
-            sparsityVariationsAtoms[candidate_sparsity] = candidate_atoms
-            sparsityVariationsMSE[candidate_sparsity] = min_mse
-
-        mmpdf_sparVar_results = {
-            'id': signal_dict['id'],
-            'sparsityLevels': sparsity_levels,
-            'atoms': sparsityVariationsAtoms,
-            'mse': sparsityVariationsMSE
-        }
-
-        return mmpdf_sparVar_results
-    
-    def mmpdfSparsityVariationPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, max_branches:int=10, max_sparsity:int=10, verbose=False) :
-        """Create a pipeline of the MMP-DF Precsion-Recall Curves metric from the database of MMP-DF results
-        Args:
-            input_filename (str): The name of the input file containing the signals database
-            output_filename (str): The name of the output file to store the results
-            nb_cores (int): The number of cores to use for parallel processing
-            max_branches (int): The maximum number of branches to consider
-            max_sparsity (int): The maximum sparsity level to consider
-            verbose (bool): The verbosity flag
-        Returns:
-            None : it saves the results in a file
-        """
-        with open(input_filename, 'r') as json_file:
-            data = json.load(json_file)
-            if data is None:
-                raise ValueError("The input file is empty or does not contain any data.")
-        
-        if verbose :
-            print(f"MMP-DF sparVar Pipeline from {input_filename} with {len(data['mmp'])} signals")
-
-        # Extract the signals from the DB
-        mmpdf_results = data['mmp']
-        # Create the results dictionary
-        results = dict()
-        results['source'] = input_filename
-        results['date'] = get_today_date_str()
-        results['algorithm'] = 'MMP-DF'
-        results['maxBranches'] = max_branches
-        results['maxSparsity'] = max_sparsity
-        results['dictionary'] = str(self.dictionary)
-
-        # Parallelize the OMP algorithm on the signals from the DB
-        mmpdf_sparVar_results = Parallel(n_jobs=nb_cores)(delayed(self.computeSparsityVariation_MMPDF)(mmpdf_dict, max_branches=max_branches, max_sparsity=max_sparsity, verbose=verbose) for mmpdf_dict in tqdm(mmpdf_results, desc='MMP-DF sparsity variation Pipeline from DB'))
-        results['results'] = mmpdf_sparVar_results
-        # Save the results in a JSON file
-        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
-        if verbose :
-            print(f"MMP-DF sparVar Pipeline results saved in {output_filename}")
-
-
-    #               ______     __    __     ______  
-    #              /\  __ \   /\ "-./  \   /\  == \ 
-    #              \ \ \/\ \  \ \ \-./\ \  \ \  _-/ 
-    #               \ \_____\  \ \_\ \ \_\  \ \_\   
-    #                \/_____/   \/_/  \/_/   \/_/                                     
-
-    def computePRDataFromDict_OMP(self, mmpdf_dict:dict, max_sparsity:int=10, verbose:bool=False) -> dict:
-        """
-        Process the OMP from MMP-DF dict to extract precision-recall data.
-        Args :
-            mmpdf_dict (dict) : The MMP-DF dictionary.
-            max_sparsity (int) : The maximum sparsity level to consider.
-        Returns :
-            dict : The precision-recall data.
-        """
-        # Retrieve the tree structure to the max number of branches
-        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches=3)
-        
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
-        signal = signal_dict['signal']
-        true_atoms = signal_dict['atoms']
-
-        if verbose :
-            print(f"compute OMP PRC for {signal_dict['id']} with {signal_dict['sparsity']} atoms")
-
-        # Initialize the precion-recall dataframe
-        precisions = []
-        recalls = []
-
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms, _ = MMPTree.ompCandidateFromMMPTreeDict(mmp_tree_dict, self.dictionary, signal, candidate_sparsity=candidate_sparsity)
-            precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20)
-            precisions.append(precision)
-            recalls.append(recall)
-
-        omp_pr_results = {
-            'id': signal_dict['id'],
-            'snr': signal_dict['snr'],
-            'trueSparsity': signal_dict['sparsity'],
-            'sparsityLevels': sparsity_levels,
-            'precisions': precisions,
-            'recalls': recalls
-        }
-
-        return omp_pr_results
-    
-    def ompPrecisonRecallPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, max_sparsity:int=10, verbose:bool=False) :
-        """Create a pipeline of the OMP Precsion-Recall Curves metric from the database of MMP-DF results
-        Args:
-            input_filename (str): The name of the input file containing the signals database
-            output_filename (str): The name of the output file to store the results
-            nb_cores (int): The number of cores to use for parallel processing
-            max_branches (int): The maximum number of branches to consider
-            max_sparsity (int): The maximum sparsity level to consider
-            verbose (bool): The verbosity flag
-        Returns:
-            None : it saves the results in a file
-        """
-        with open(input_filename, 'r') as json_file:
-            data = json.load(json_file)
-            if data is None:
-                raise ValueError("The input file is empty or does not contain any data.")
-        
-        if verbose :
-            print(f"OMP PRC Pipeline from {input_filename} with {len(data['mmp'])} signals")
-
-        # Extract the signals from the DB
-        mmpdf_results = data['mmp']
-        # Create the results dictionary
-        results = dict()
-        results['source'] = input_filename
-        results['date'] = get_today_date_str()
-        results['algorithm'] = 'Precision-recall of convolutional OMP'
-        results['maxSparsity'] = max_sparsity
-        results['dictionary'] = str(self)
-
-        # Parallelize the OMP algorithm on the signals from the DB
-        omp_prc_results = Parallel(n_jobs=nb_cores)(delayed(self.computePRDataFromDict_OMP)(mmpdf_dict, max_sparsity=max_sparsity, verbose=verbose) for mmpdf_dict in tqdm(mmpdf_results, desc='OMP PRC Pipeline from DB'))
-        results['prc'] = omp_prc_results
-        # Save the results in a JSON file
-        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
-        if verbose :
-            print(f"OMP PRC Pipeline results saved in {output_filename}")
-
-    def computeSparsityVariation_OMP(self, mmpdf_dict:dict, max_sparsity:int=10, verbose:bool=False) -> dict:
-        """
-        Process the OMP from MMP-DF dict to extract precision-recall data.
-        Args :
-            mmpdf_dict (dict) : The MMP-DF dictionary.
-            max_sparsity (int) : The maximum sparsity level to consider.
-        Returns :
-            dict : The precision-recall data.
-        """
-        # Retrieve the tree structure to the max number of branches
-        mmp_tree_dict = MMPTree.shrinkMMPTreeDict(mmpdf_dict['mmp-tree'], max_branches=3)
-        
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mmpdf_dict['id'])
-        signal = signal_dict['signal']
-
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        sparsityVariationsAtoms = {}
-        sparsityVariationsMSE = {}
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms, min_mse = MMPTree.ompCandidateFromMMPTreeDict(mmp_tree_dict, self.dictionary, signal, candidate_sparsity=candidate_sparsity)
-            sparsityVariationsAtoms[candidate_sparsity] = candidate_atoms
-            sparsityVariationsMSE[candidate_sparsity] = min_mse
-
-        omp_sparVar_results = {
-            'id': signal_dict['id'],
-            'sparsityLevels': sparsity_levels,
-            'atoms': sparsityVariationsAtoms,
-            'mse': sparsityVariationsMSE
-        }
-
-        return omp_sparVar_results
-
-    def ompSparsityVariationPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, max_branches:int=10, max_sparsity:int=10, verbose=False) :
-        """Create a pipeline of the OMP sparsity variation from the database of MMP-DF results
-        Args:
-            input_filename (str): The name of the input file containing the signals database
-            output_filename (str): The name of the output file to store the results
-            nb_cores (int): The number of cores to use for parallel processing
-            max_branches (int): The maximum number of branches to consider
-            max_sparsity (int): The maximum sparsity level to consider
-            verbose (bool): The verbosity flag
-        Returns:
-            None : it saves the results in a file
-        """
-        with open(input_filename, 'r') as json_file:
-            data = json.load(json_file)
-            if data is None:
-                raise ValueError("The input file is empty or does not contain any data.")
-        
-        if verbose :
-            print(f"MMP-DF sparVar Pipeline from {input_filename} with {len(data['mmp'])} signals")
-
-        # Extract the signals from the DB
-        mmpdf_results = data['mmp']
-        # Create the results dictionary
-        results = dict()
-        results['source'] = input_filename
-        results['date'] = get_today_date_str()
-        results['algorithm'] = 'OMP'
-        results['maxBranches'] = max_branches
-        results['maxSparsity'] = max_sparsity
-        results['dictionary'] = str(self.dictionary)
-
-        # Parallelize the OMP algorithm on the signals from the DB
-        omp_sparVar_results = Parallel(n_jobs=nb_cores)(delayed(self.computeSparsityVariation_OMP)(mmpdf_dict, max_sparsity=max_sparsity, verbose=verbose) for mmpdf_dict in tqdm(mmpdf_results, desc='OMP sparsity variation Pipeline from DB'))
-        results['results'] = omp_sparVar_results
-        # Save the results in a JSON file
-        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
-        if verbose :
-            print(f"OMP sparVar Pipeline results saved in {output_filename}")
-
-    #                __    __     ______  
-    #               /\ "-./  \   /\  == \ 
-    #               \ \ \-./\ \  \ \  _-/ 
-    #                \ \_\ \ \_\  \ \_\   
-    #                 \/_/  \/_/   \/_/                                     
-
-    def computePRDataFromDict_MP(self, mp_dict:dict, max_sparsity:int=10, verbose:bool=False) -> dict:
-        """
-        Process the OMP from MMP-DF dict to extract precision-recall data.
-        Args :
-            mmpdf_dict (dict) : The MMP-DF dictionary.
-            max_sparsity (int) : The maximum sparsity level to consider.
-        Returns :
-            dict : The precision-recall data.
-        """
-        # Retrieve the atoms from the MP algorithm output
-        approx_atoms = mp_dict['atoms']
-
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mp_dict['id'])
-        signal = signal_dict['signal']
-        true_atoms = signal_dict['atoms']
-
-        if verbose :
-            print(f"compute MP PRC for {signal_dict['id']} with {signal_dict['sparsity']} atoms")
-
-        # Initialize the precion-recall dataframe
-        precisions = []
-        recalls = []
-
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms = approx_atoms[:min(candidate_sparsity, len(approx_atoms))]
-            precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, candidate_sparsity, position_error_threshold=20)
-            precisions.append(precision)
-            recalls.append(recall)
-
-        mp_pr_results = {
-            'id': signal_dict['id'],
-            'snr': signal_dict['snr'],
-            'trueSparsity': signal_dict['sparsity'],
-            'sparsityLevels': sparsity_levels,
-            'precisions': precisions,
-            'recalls': recalls
-        }
-
-        return mp_pr_results
-    
-    def mpPrecisonRecallPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, max_sparsity:int=10, verbose:bool=False) :
-        """Create a pipeline of the MP Precsion-Recall Curves metric from the database of MP results
-        Args:
-            input_filename (str): The name of the input file containing the signals database
-            output_filename (str): The name of the output file to store the results
-            nb_cores (int): The number of cores to use for parallel processing
-            max_branches (int): The maximum number of branches to consider
-            max_sparsity (int): The maximum sparsity level to consider
-            verbose (bool): The verbosity flag
-        Returns:
-            None : it saves the results in a file
-        """
-        with open(input_filename, 'r') as json_file:
-            data = json.load(json_file)
-            if data is None:
-                raise ValueError("The input file is empty or does not contain any data.")
-        
-        if verbose :
-            print(f"MP PRC Pipeline from {input_filename} with {len(data['mp'])} signals")
-
-        # Extract the signals from the DB
-        mp_results = data['mp']
-        # Create the results dictionary
-        results = dict()
-        results['source'] = input_filename
-        results['date'] = get_today_date_str()
-        results['algorithm'] = 'Precision-recall of convolutional MP'
-        results['maxSparsity'] = max_sparsity
-        results['dictionary'] = str(self)
-
-        # Parallelize the OMP algorithm on the signals from the DB
-        omp_prc_results = Parallel(n_jobs=nb_cores)(delayed(self.computePRDataFromDict_MP)(mp_dict, max_sparsity=max_sparsity, verbose=verbose) for mp_dict in tqdm(mp_results, desc='MP PRC Pipeline from DB'))
-        results['prc'] = omp_prc_results
-        # Save the results in a JSON file
-        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
-        if verbose :
-            print(f"OMP PRC Pipeline results saved in {output_filename}")
-
-    def computeSparsityVariation_MP(self, mp_dict:dict, max_sparsity:int=10, verbose:bool=False) -> dict:
-        """
-        Process the MP sparVar from MP dict to extract precision-recall data.
-        Args :
-            mmpdf_dict (dict) : The MMP-DF dictionary.
-            max_sparsity (int) : The maximum sparsity level to consider.
-        Returns :
-            dict : The precision-recall data.
-        """
-        # Retrieve the atoms from the MP algorithm output
-        approx_atoms = mp_dict['atoms']
-
-        # Retrieve the signal from the datas
-        signal_dict = self.signalDictFromId(mp_dict['id'])
-
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        sparsityVariationsAtoms = {}
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms = approx_atoms[:min(candidate_sparsity, len(approx_atoms))]
-            sparsityVariationsAtoms[candidate_sparsity] = candidate_atoms
-
-        mp_sparVar_results = {
-            'id': signal_dict['id'],
-            'sparsityLevels': sparsity_levels,
-            'atoms': sparsityVariationsAtoms
-        }
-
-        return mp_sparVar_results
-    
-    def mpSparsityVariationPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, max_sparsity:int=10, verbose:bool=False) :
-        """Create a pipeline of the MP sparsity variation results from the database of MP results
-        Args:
-            input_filename (str): The name of the input file containing the signals database
-            output_filename (str): The name of the output file to store the results
-            nb_cores (int): The number of cores to use for parallel processing
-            max_branches (int): The maximum number of branches to consider
-            max_sparsity (int): The maximum sparsity level to consider
-            verbose (bool): The verbosity flag
-        Returns:
-            None : it saves the results in a file
-        """
-        with open(input_filename, 'r') as json_file:
-            data = json.load(json_file)
-            if data is None:
-                raise ValueError("The input file is empty or does not contain any data.")
-        
-        if verbose :
-            print(f"MP sparVar Pipeline from {input_filename} with {len(data['mp'])} signals")
-
-        # Extract the signals from the DB
-        mp_results = data['mp']
-        # Create the results dictionary
-        results = dict()
-        results['source'] = input_filename
-        results['date'] = get_today_date_str()
-        results['algorithm'] = 'MP'
-        results['maxSparsity'] = max_sparsity
-        results['dictionary'] = str(self)
-
-        # Parallelize the OMP algorithm on the signals from the DB
-        mp_sparVar_results = Parallel(n_jobs=nb_cores)(delayed(self.computeSparsityVariation_MP)(mp_dict, max_sparsity=max_sparsity, verbose=verbose) for mp_dict in tqdm(mp_results, desc='MP sparVar Pipeline from DB'))
-        results['results'] = mp_sparVar_results
-        # Save the results in a JSON file
-        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
-        if verbose :
-            print(f"MP sparVar Pipeline results saved in {output_filename}")
 
     #       ╔═╗╦  ╔═╗╦ ╦╔═╗   ┌─┐┌─┐┌─┐
     #       ╠═╣║  ╠═╝╠═╣╠═╣───│  └─┐│  
@@ -3019,323 +2397,15 @@ class CSCWorkbench:
         plt.title(f'alphaCSC Decomposition with {sparsity} atoms', fontsize=16)
         plt.legend(loc='best', title='Components')
         plt.show()
-
-    #    ______   ______     ______        ______   __         ______     ______  
-    #   /\  == \ /\  == \   /\  ___\      /\  == \ /\ \       /\  __ \   /\__  _\ 
-    #   \ \  _-/ \ \  __<   \ \ \____     \ \  _-/ \ \ \____  \ \ \/\ \  \/_/\ \/ 
-    #    \ \_\    \ \_\ \_\  \ \_____\     \ \_\    \ \_____\  \ \_____\    \ \_\ 
-    #     \/_/     \/_/ /_/   \/_____/      \/_/     \/_____/   \/_____/     \/_/ 
-                                                                               
-
-    def plotPRCurvesFromDB(self, **kwargs) :
-        """
-        Plot the precision-recall curves from the results of the OMP and MP algorithms
-        Args :
-            prc_db_paths (dict) : The paths to the precision-recall databases
-        """
-        prc_results = {}
-        n_samples=1000
-        verbose=False
-        maxSparsity = np.inf
-        maxSparsityArg = np.inf
-        for key, value in kwargs.items() :
-            if key == 'n_samples' :
-                n_samples = value
-            elif key == 'max_sparsity' :
-                maxSparsityArg = value
-            elif key == 'verbose' :
-                verbose = value
-            else :
-                with open(value, 'r') as f:
-                    prc_db = json.load(f)
-                    prc_results[key] = prc_db['prc']
-                    if prc_db['maxSparsity'] < maxSparsity :
-                        maxSparsity = prc_db['maxSparsity']
-
-        # Update the max sparsity level
-        maxSparsity = min(maxSparsity, maxSparsityArg)
-        if verbose :
-            print(f'maxSparsity =  {maxSparsity}')
-
-        # Extract the precision-recall data for each algorithm
-        pr_data = {}
-        for algorithm, results in prc_results.items() :
-            pr_data[algorithm] = []
-            for result in results :
-                metric_precisions = result['precisions']
-                metric_recalls = result['recalls']
-                sparsity_levels = result['sparsityLevels']
-                pr_array = np.array([[precision, recall] for precision, recall, sparsity in zip(metric_precisions, metric_recalls, sparsity_levels) if sparsity <= maxSparsity])
-                pr_data[algorithm].append(pr_array)
-
-        # Create the plot
-        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-        plt.axhline(y=0.5, color='black', linestyle='--', label='Chance level')
-
-        # Compute the mean precision-recall curve for each algorithm
-        for i, (algorithm, data) in enumerate(pr_data.items()) :
-            pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(data, n_samples)
-            CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=f'C{i}', label=algorithm)
-            CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=f'C{i}', alpha=0.4)
-            CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color=f'C{i}', alpha=0.4)
-            plt.fill_between(pr_mean[:, 1], pr_mean_plus_std[:, 0], pr_mean_minus_std[:, 0], alpha=0.13)
-        
-        plt.title('Precision-Recall Curve', fontsize=16)
-        plt.legend(loc='best', title='Algorithm')
-        plt.xlabel('Recall', fontsize=14)
-        plt.ylabel('Precision', fontsize=14)
-        plt.show()
-
-    def plotPRCSNRFromDB(self, **kwargs) :
-        """
-        Plot the precision-recall curves from the results of the OMP and MP algorithms
-        Args :
-            prc_db_paths (dict) : The paths to the precision-recall databases
-        """
-        prc_results = {}
-
-        n_samples=1000
-        maxSparsity = np.inf
-        maxSparsityArg = np.inf
-        for key, value in kwargs.items() :
-            if key == 'n_samples' :
-                n_samples = value
-            elif key == 'max_sparsity' :
-                maxSparsityArg = value
-            else :
-                with open(value, 'r') as f:
-                    prc_db = json.load(f)
-                    prc_results[key] = prc_db['prc']
-                    if prc_db['maxSparsity'] < maxSparsity :
-                        maxSparsity = prc_db['maxSparsity']
-
-        # Update the max sparsity level
-        maxSparsity = min(maxSparsity, maxSparsityArg)
-
-        # Extract the precision-recall data for each algorithm
-        pr_data = {}
-        snrLevels = [-5, 0, 5, 10, 15]
-        for algorithm, results in prc_results.items() :
-            pr_data[algorithm] = {snr:[] for snr in snrLevels}
-            for result in results :
-                metric_precisions = result['precisions']
-                metric_recalls = result['recalls']
-                sparsity_levels = result['sparsityLevels']
-                pr_array = np.array([[precision, recall] for precision, recall, sparsity in zip(metric_precisions, metric_recalls, sparsity_levels) if sparsity <= maxSparsity])
-                pr_data[algorithm][result['snr']].append(pr_array)
-
-        # Create the plot
-        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-        plt.axhline(y=0.5, color='black', linestyle='--', label='Chance level')
-
-        # Compute the mean precision-recall curve for each algorithm
-        for i, (algorithm, snr_data) in enumerate(pr_data.items()) :
-            for j, (snr, data) in enumerate(snr_data.items()) :
-                pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(data, n_samples)
-                color = f'C{len(snrLevels) * i + j}'
-                CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=color, label=f'{algorithm} - SNR {snr}')
-                CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=color, alpha=0.4)
-                CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color=color, alpha=0.4)
-                #plt.fill_between(pr_mean[:, 1], pr_mean_plus_std[:, 0], pr_mean_minus_std[:, 0], alpha=0.1)
-
-        plt.title('Precision-Recall Curve', fontsize=16)
-        plt.legend(loc='best', title='Algorithm')
-        plt.xlabel('Recall', fontsize=14)
-        plt.ylabel('Precision', fontsize=14)
-        plt.show()
-
-    def plotPRCMMPDFFromDB(self, **kwargs) :
-        """
-        Plot the precision-recall curves from the results of the OMP and MP algorithms
-        Args :
-            prc_db_paths (dict) : The paths to the precision-recall databases
-        """
-        prc_results = {}
-
-        n_samples=1000
-        maxSparsity = np.inf
-        maxSparsityArg = np.inf
-        for key, value in kwargs.items() :
-            if key == 'n_samples' :
-                n_samples = value
-            elif key == 'max_sparsity' :
-                maxSparsityArg = value
-            else :
-                with open(value, 'r') as f:
-                    prc_db = json.load(f)
-                    prc_results[key] = prc_db['prc']
-                    if prc_db['maxSparsity'] < maxSparsity :
-                        maxSparsity = prc_db['maxSparsity']
-
-        # Update the max sparsity level
-        maxSparsity = min(maxSparsity, maxSparsityArg)
-
-        # Extract the precision-recall data for each algorithm
-        pr_data = {}
-        snrLevels = [-5, 0, 5, 10, 15]
-        for algorithm, results in prc_results.items() :
-            pr_data[algorithm] = {snr:[] for snr in snrLevels}
-            for result in results :
-                metric_precisions = result['precisions']
-                metric_recalls = result['recalls']
-                sparsity_levels = result['sparsityLevels']
-                pr_array = np.array([[precision, recall] for precision, recall, sparsity in zip(metric_precisions, metric_recalls, sparsity_levels) if sparsity <= maxSparsity])
-                pr_data[algorithm][result['snr']].append(pr_array)
-
-        # Create the plot
-        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-        plt.axhline(y=0.5, color='black', linestyle='--', label='Chance level')
-
-        # Compute the mean precision-recall curve for each algorithm
-        for i, (algorithm, snr_data) in enumerate(pr_data.items()) :
-            for j, (snr, data) in enumerate(snr_data.items()) :
-                pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(data, n_samples)
-                color = f'C{len(snrLevels) * i + j}'
-                CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=color, label=f'{algorithm} - SNR {snr}')
-                CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=color, alpha=0.4)
-                CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color=color, alpha=0.4)
-                #plt.fill_between(pr_mean[:, 1], pr_mean_plus_std[:, 0], pr_mean_minus_std[:, 0], alpha=0.1)
-
-        plt.title('Precision-Recall Curve', fontsize=16)
-        plt.legend(loc='best', title='Algorithm')
-        plt.xlabel('Recall', fontsize=14)
-        plt.ylabel('Precision', fontsize=14)
-        plt.show()
-
-    #                                            /$$    /$$                   
-    #                                           | $$   | $$                   
-    #     /$$$$$$$  /$$$$$$   /$$$$$$   /$$$$$$ | $$   | $$ /$$$$$$   /$$$$$$ 
-    #    /$$_____/ /$$__  $$ |____  $$ /$$__  $$|  $$ / $$/|____  $$ /$$__  $$
-    #   |  $$$$$$ | $$  \ $$  /$$$$$$$| $$  \__/ \  $$ $$/  /$$$$$$$| $$  \__/
-    #    \____  $$| $$  | $$ /$$__  $$| $$        \  $$$/  /$$__  $$| $$      
-    #    /$$$$$$$/| $$$$$$$/|  $$$$$$$| $$         \  $/  |  $$$$$$$| $$      
-    #   |_______/ | $$____/  \_______/|__/          \_/    \_______/|__/      
-    #             | $$                                                        
-    #             | $$                                                        
-    #             |__/                                                        
-
-    def getPRCFromSparVarDB(self, sparVar_db_path:str, snr_criteria:int, sparsity_criteria:int, maxSparsity:int, position_error_threshold:int=10, correlation_threshold:float=-1, verbose:bool=False) :
-        """
-        Args :
-        Returns :
-            --------
-            pr_mean : numpy.ndarray
-                A 2D array where the first column contains the mean precision values
-                and the second column contains the corresponding recall values.
-            pr_mean_plus_std : numpy.ndarray
-                A 2D array where the first column contains the mean precision values
-                plus one standard deviation and the second column contains the
-                corresponding recall values.
-            pr_mean_minus_std : numpy.ndarray
-                A 2D array where the first column contains the mean precision values
-                minus one standard deviation and the second column contains the
-                corresponding recall values.
-        """
-        with open(sparVar_db_path, 'r') as f:
-            sparVar_db = json.load(f)
-            sparVar_results = sparVar_db['results']
-
-        def signal_condition(signal_snr, signal_sparsity, verbose:bool=False) :
-            if sparsity_criteria == -1 and snr_criteria == -1 :
-                return True
-            elif sparsity_criteria == -1 and snr_criteria != -1 :
-                return (signal_snr == snr_criteria)
-            elif sparsity_criteria != -1 and snr_criteria == -1 :
-                return (signal_sparsity == sparsity_criteria)
-            else :
-                return (signal_sparsity == sparsity_criteria) and (signal_snr == snr_criteria)
-
-        pr_results = []
-        for result_dict in sparVar_results :
-            signal_dict = self.signalDictFromId(id=result_dict['id'])
-            if signal_condition(signal_dict['snr'], signal_dict['sparsity'], verbose) and signal_dict['snr'] >= 0 :
-                true_atoms = signal_dict['atoms']
-                pr_metrics = []
-                for spar in result_dict['sparsityLevels'] :
-                    if spar > maxSparsity :
-                        break
-                    candidate_atoms = result_dict['atoms'][str(spar)]
-                    precision, recall = self.computePrecisionRecallMetrics(true_atoms, candidate_atoms, spar, position_error_threshold, correlation_threshold)
-                    pr_metrics.append([precision, recall])
-                pr_results.append(np.array(pr_metrics))
-
-        if verbose :
-            print(f'    -> {sparVar_db_path} : {len(pr_results)} arrays of PR metrics')
-
-        pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(pr_results, maxSparsity)
-        return pr_mean, pr_mean_plus_std, pr_mean_minus_std
-
-    def plotPRCFromSparVarDB(self, **kwargs) :
-        """
-        Args :
-        Returns :
-        """
-        snr_criteria = -1
-        sparsity_criteria = -1
-        verbose = False
-        maxSparsity = 10
-        sparVar_db_paths = {}
-        position_error_threshold = 10
-        correlation_threshold = -1
-
-        # Extract the keywords arguments
-        for key, value in kwargs.items() :
-            if key =='sparsity' :
-                sparsity_criteria = value
-            elif key == 'snr' :
-                snr_criteria = value
-            elif key == 'max_sparsity' :
-                maxSparsity = value
-            elif key == 'verbose' :
-                verbose = value
-            elif key == 'position_error_threshold' :
-                position_error_threshold = value
-            elif key == 'correlation_threshold' :
-                correlation_threshold = value
-            else :
-                sparVar_db_paths[key] = value
-
-        if verbose :    
-            print(f'SNR = {snr_criteria}')
-            print(f'Sparsity = {sparsity_criteria}')
-            print(f'Max sparsity = {maxSparsity}')
-            print(f'Position error threshold = {position_error_threshold}')
-            print(f'Correlation threshold = {correlation_threshold}')
-
-        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-
-        for i, (algorithm, path) in enumerate(sparVar_db_paths.items()) :
-            if verbose :
-                print(f'{algorithm} : compute PRC from {path}')
-            color = f'C{i}'
-            pr_mean, pr_mean_plus_std, pr_mean_minus_std = self.getPRCFromSparVarDB(path, snr_criteria, sparsity_criteria, maxSparsity, position_error_threshold, correlation_threshold, verbose)
-            CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=color, label=algorithm)
-            CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=color, alpha=0.3)
-            CSCWorkbench.plotPRCurve(pr_mean_minus_std, ax=ax, color=color, alpha=0.3)
-            plt.fill_between(pr_mean[:, 1], pr_mean_plus_std[:, 0], pr_mean_minus_std[:, 0], alpha=0.1)
-
-        legend_title = str()
-        if snr_criteria != -1 and sparsity_criteria != -1 :
-            legend_title = f'SNR={snr_criteria} & Sparsity={sparsity_criteria}'
-        elif snr_criteria != -1 and sparsity_criteria == -1:
-            legend_title = f'SNR={snr_criteria}'
-        elif snr_criteria == -1 and sparsity_criteria != -1 :
-            legend_title = f'Sparsity={sparsity_criteria}'
-        plt.title(f'Precision-Recall Curve : position_error_threshold = {position_error_threshold}', fontsize=16)
-        plt.legend(loc='best', title=legend_title)
-        plt.xlabel('Recall', fontsize=14)
-        plt.ylabel('Precision', fontsize=14)
-        plt.show()
-
-
-#         ________  ________  ________  ________  ___      ___ ________  ________     
-#       |\   ____\|\   __  \|\   __  \|\   __  \|\  \    /  /|\   __  \|\   __  \    
-#        \ \  \___|\ \  \|\  \ \  \|\  \ \  \|\  \ \  \  /  / | \  \|\  \ \  \|\  \   
-#         \ \_____  \ \   ____\ \   __  \ \   _  _\ \  \/  / / \ \   __  \ \   _  _\  
-#          \|____|\  \ \  \___|\ \  \ \  \ \  \\  \\ \    / /   \ \  \ \  \ \  \\  \| 
-#            ____\_\  \ \__\    \ \__\ \__\ \__\\ _\\ \__/ /     \ \__\ \__\ \__\\ _\ 
-#           |\_________\|__|     \|__|\|__|\|__|\|__|\|__|/       \|__|\|__|\|__|\|__|
-#           \|_________|                                                              
+                                                                      
+    #         ________  ________  ________  ________  ___      ___ ________  ________     
+    #       |\   ____\|\   __  \|\   __  \|\   __  \|\  \    /  /|\   __  \|\   __  \    
+    #        \ \  \___|\ \  \|\  \ \  \|\  \ \  \|\  \ \  \  /  / | \  \|\  \ \  \|\  \   
+    #         \ \_____  \ \   ____\ \   __  \ \   _  _\ \  \/  / / \ \   __  \ \   _  _\  
+    #          \|____|\  \ \  \___|\ \  \ \  \ \  \\  \\ \    / /   \ \  \ \  \ \  \\  \| 
+    #            ____\_\  \ \__\    \ \__\ \__\ \__\\ _\\ \__/ /     \ \__\ \__\ \__\\ _\ 
+    #           |\_________\|__|     \|__|\|__|\|__|\|__|\|__|/       \|__|\|__|\|__|\|__|
+    #           \|_________|                                                              
                                                                                                                    
     def computeSparVarMetricsFromDict(self, sparvar_dict:dict, pos_err_threshold:int=20, corr_err_threshold:float=0.75) -> Tuple[List[float], List[float]] :
         """
@@ -3361,15 +2431,8 @@ class CSCWorkbench:
             approx_atoms = result_dict['atoms']
             np_approx_atoms = len(approx_atoms)
 
-            # Atom matching: Hungarian matching ensuring len(matched_atoms) = nb_true_atoms
-            matched_atoms = self.computeMatchingPosition(true_atoms, approx_atoms)
-
-            # Compute the errors in position and correlation
-            position_errors = [abs(true_atom['x'] - approx_atom['x']) for true_atom, approx_atom in matched_atoms]
-            correlations = [self.dictionary.correlationFromDicts(true_atom, approx_atom, self.signals_length) for true_atom, approx_atom in matched_atoms]
-            
             # Compute the true positives, precision and recall
-            tp = sum(1 for position_error, correlation in zip(position_errors, correlations) if position_error <= pos_err_threshold and correlation > corr_err_threshold)
+            tp = self.computeMaxTruePositives(true_atoms, approx_atoms, pos_err_threshold, corr_err_threshold)
             precision = tp / np_approx_atoms
             recall = tp / nb_true_atoms
 
@@ -3442,7 +2505,8 @@ class CSCWorkbench:
                 sparvar_db_path = path,
                 results_key = str(algorithm),
                 pos_err_threshold = pos_err_threshold,
-                corr_err_threshold = corr_err_threshold
+                corr_err_threshold = corr_err_threshold,
+                verbose=verbose
                 )
             CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=f'C{i}', label='CSC-'+str(algorithm).upper())
             CSCWorkbench.plotPRCurve(pr_mean_plus_std, ax=ax, color=f'C{i}', alpha=0.3)
@@ -3455,8 +2519,4 @@ class CSCWorkbench:
         plt.xlabel('Recall', fontsize=14)
         plt.ylabel('Precision', fontsize=14)
         plt.grid(alpha=0.5)
-        plt.show()
-        
-            
-                                                                                                                                                                                                                    
-                 
+        plt.show()                                                                                                                                                                                                                    
