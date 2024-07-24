@@ -342,6 +342,8 @@ class ZSDictionary() :
         db['snrLevels'] = snr_levels
         db['signalLength'] = signal_length
         db['sparsityLevels'] = sparsity_levels
+        db['posErrThreshold'] = pos_err_threshold
+        db['corrErrThreshold'] = corr_err_threshold
         db['dictionary'] = str(self)
         # Initialize the signals list
         idx = 0
