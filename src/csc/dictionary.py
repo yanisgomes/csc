@@ -324,7 +324,7 @@ class ZSDictionary() :
         noisy_signal = signal + noise
         return noisy_signal, atoms_infos
 
-    def generateConstrainedSignalsDB(self, batch_size:int, signal_length:int, sparsity_levels:List[int], snr_levels:List[float], output_filename:str) -> None:
+    def generateConstrainedSignalsDB(self, batch_size:int, signal_length:int, sparsity_levels:List[int], snr_levels:List[float], pos_err_threshold:float, corr_err_threshold:float, output_filename:str) -> None:
         """Generate a database of signals with different SNR levels and store it in a JSON file
         Args:
             batch_size (int): The number of signals to generate for each SNR level
@@ -348,7 +348,7 @@ class ZSDictionary() :
         signals = []
         for snr, sparsity in product(snr_levels, sparsity_levels) :
             for _ in range(batch_size):
-                signal, infos = self.generateConstrainedTestSignal(signal_length, sparsity, snr)
+                signal, infos = self.generateConstrainedTestSignal(signal_length, sparsity, snr, pos_err_threshold, corr_err_threshold)
                 result = {
                     'id' : idx,
                     'snr': snr,
@@ -741,6 +741,7 @@ class ZSDictionary() :
         results['algorithm'] = 'Convolutional OMP'
         results['batchSize'] = data['batchSize']
         results['snrLevels'] = data['snrLevels']
+        results['maxSparsityLevel'] = max_sparsity
         results['signalLength'] = data['signalLength']
         results['sparsityLevels'] = data['sparsityLevels']
         results['dictionary'] = str(self)
@@ -980,6 +981,7 @@ class ZSDictionary() :
         results['algorithm'] = 'Convolutional MP'
         results['batchSize'] = data['batchSize']
         results['snrLevels'] = data['snrLevels']
+        results['maxSparsityLevel'] = max_sparsity
         results['signalLength'] = data['signalLength']
         results['sparsityLevels'] = data['sparsityLevels']
         results['dictionary'] = str(self)
