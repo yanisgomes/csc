@@ -260,6 +260,108 @@ class ZSDictionary() :
         db['signals'] = signals
         json.dump(db, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
         print(f"Signals database saved in {output_filename}")
+
+    
+    #      ______                 __             _                __
+    #     / ____/___  ____  _____/ /__________ _(_)___  ___  ____/ /
+    #    / /   / __ \/ __ \/ ___/ __/ ___/ __ `/ / __ \/ _ \/ __  / 
+    #   / /___/ /_/ / / / (__  ) /_/ /  / /_/ / / / / /  __/ /_/ /  
+    #   \____/\____/_/ /_/____/\__/_/   \__,_/_/_/ /_/\___/\__,_/   
+    #                                                               
+
+    def generateConstrainedTestSignal(self, signal_length:int, sparsity_level:int, snr_level:int, pos_err_threshold:int, corr_err_threshold:float) -> np.ndarray:
+        """Generate a test signal as a linear combination of the atoms in the dictionary
+        Args:
+            signal_length (int): The length of the signal to generate
+            sparsity_level (int): The sparsity level of the signal
+            snr_level (int): The SNR level between noise and the signal in decibels
+            pos_err_threshold (int): The maximum position error between two similar atoms
+            corr_err_threshold (float): The maximum correlation error between two similar atoms
+        Returns:
+            signal (np.ndarray): The generated test signal
+            atoms_infos (dict): position : ZSAtom corresponding
+        """
+        assert sparsity_level <= len(self.atoms), "The sparsity level must be less than or equal to the number of atoms in the dictionary"
+        assert signal_length >= self.atoms_length, "The signal length must be greater than or equal to the maximum atom length"
+        
+        # Initialize the test signal
+        signal = np.zeros(signal_length)
+        atom_signals = []
+        atom_positions = []
+        atoms_infos = []
+
+        while len(atoms_infos) < sparsity_level:
+            atom_idx = np.random.choice(len(self.atoms))
+            atom_position = np.random.randint(0, signal_length-self.atoms_length+1)
+
+            atom_signal = self.atoms[atom_idx].getSignal()
+            atom_full_signal = np.zeros(signal_length)
+            atom_full_signal[atom_position:atom_position+len(atom_signal)] = atom_signal
+
+            # Check if similar atoms are not already in the signal
+            similar_atom_found = False
+            for other_atom_position, other_atom_signal in zip(atom_positions, atom_signals):
+                corr = np.correlate(atom_full_signal, other_atom_signal, mode='valid')
+                corr = corr / (np.linalg.norm(atom_full_signal) * np.linalg.norm(other_atom_signal))  # Normalized correlation
+                abs_pos_diff = np.abs(atom_position - other_atom_position)
+                if abs_pos_diff < pos_err_threshold or np.max(corr) > corr_err_threshold:
+                    similar_atom_found = True
+                    break
+        
+            if similar_atom_found:
+                continue
+            
+            signal += atom_full_signal
+            atom_positions.append(atom_position)
+            atom_signals.append(atom_full_signal)
+            atoms_infos.append({'x': atom_position, 'b': self.atoms[atom_idx].params['b'], 'y': self.atoms[atom_idx].params['y'], 's': self.atoms[atom_idx].params['sigma']})
+        
+        non_zero_index = np.argwhere(np.abs(signal) > ZSAtom.SUPPORT_THRESHOLD)
+        non_zero_signal = signal[non_zero_index]
+        signal_power = np.var(non_zero_signal)   
+        noise_var = signal_power / (10 ** (snr_level / 10))
+        noise = np.random.normal(0, np.sqrt(noise_var), signal_length)
+        noisy_signal = signal + noise
+        return noisy_signal, atoms_infos
+
+    def generateConstrainedSignalsDB(self, batch_size:int, signal_length:int, sparsity_levels:List[int], snr_levels:List[float], output_filename:str) -> None:
+        """Generate a database of signals with different SNR levels and store it in a JSON file
+        Args:
+            batch_size (int): The number of signals to generate for each SNR level
+            signals_length (int): The length of the signals to generate
+            sparsity_level (List[int]): The sparsity levels of the signals
+            snr_levels (List[float]): The list of SNR levels to generate the signals
+            output_filename (str): The name of the output file to store the signals
+        Returns:
+            None : it saves the signals in a file
+        """
+        # Initialize the database dictionary
+        db = {}
+        db['date'] = get_today_date_str()
+        db['batchSize'] = batch_size
+        db['snrLevels'] = snr_levels
+        db['signalLength'] = signal_length
+        db['sparsityLevels'] = sparsity_levels
+        db['dictionary'] = str(self)
+        # Initialize the signals list
+        idx = 0
+        signals = []
+        for snr, sparsity in product(snr_levels, sparsity_levels) :
+            for _ in range(batch_size):
+                signal, infos = self.generateConstrainedTestSignal(signal_length, sparsity, snr)
+                result = {
+                    'id' : idx,
+                    'snr': snr,
+                    'sparsity': sparsity,
+                    'signal': signal.tolist(),
+                    'atoms': infos
+                }
+                signals.append(result)
+                idx += 1
+        # Save the signals in a JSON file
+        db['signals'] = signals
+        json.dump(db, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
+        print(f"Signals database saved in {output_filename}")
     
     def atomsDictPositionMatchingErrors(self, atoms_info:List[dict], recov_atoms_info:List[dict]) -> List[int]:
         """Match the original atoms parameters with their recovered ones

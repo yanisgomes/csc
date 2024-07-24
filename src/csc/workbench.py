@@ -2467,12 +2467,10 @@ class CSCWorkbench:
             sparvar_results = sparvar_db[results_key]
             max_sparsity = sparvar_db['maxSparsityLevel']
 
-
         pr_results = [] # List of np.array of [precision, recall] metrics
         for result_dict in sparvar_results :
-            if result_dict['snr'] > 0 :
-                pr_array = self.computeSparVarMetricsFromDict(result_dict, pos_err_threshold, corr_err_threshold)
-                pr_results.append(pr_array)
+            pr_array = self.computeSparVarMetricsFromDict(result_dict, pos_err_threshold, corr_err_threshold)
+            pr_results.append(pr_array)
 
         pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(pr_results, max_sparsity)
         return pr_mean, pr_mean_plus_std, pr_mean_minus_std
