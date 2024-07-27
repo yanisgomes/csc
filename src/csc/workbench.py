@@ -1,14 +1,18 @@
 import os
 import time
 import json
+import math
 import itertools
 import pandas as pd
 import seaborn as sns
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
-from typing import List, Dict, Tuple, Any, Union
+from typing import List, Dict, Tuple, Any
+
 from scipy import optimize
+import scipy.stats as stats
+import scikit_posthocs as sp
 from scipy.interpolate import interp1d
 
 from .dictionary import ZSDictionary
@@ -18,8 +22,13 @@ from .utils import *
 
 from joblib import Parallel, delayed
 
+from alphacsc.update_z import update_z
+
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
+
+from critdd import Diagram
+
 
 class CSCWorkbench:
 
@@ -2298,71 +2307,16 @@ class CSCWorkbench:
 #                                                     | $$                                            
 #                                                     |__/                                            
 
-    #       ╔═╗╦  ╔═╗╦ ╦╔═╗   ┌─┐┌─┐┌─┐
-    #       ╠═╣║  ╠═╝╠═╣╠═╣───│  └─┐│  
-    #       ╩ ╩╩═╝╩  ╩ ╩╩ ╩   └─┘└─┘└─┘
 
-    def computeSparsityVariation_alphaCSC(self, signal_dict:dict, max_sparsity:int=10, verbose:bool=False) -> dict:
-        """
-        Process the MP sparVar from MP dict to extract precision-recall data.
-        Args :
-            mmpdf_dict (dict) : The MMP-DF dictionary.
-            max_sparsity (int) : The maximum sparsity level to consider.
-        Returns :
-            dict : The precision-recall data.
-        """
-        # Iterate over the attended sparsity levels
-        sparsity_levels = [i+1 for i in range(max_sparsity)]
-        sparsityVariationsAtoms = {}
-        for candidate_sparsity in sparsity_levels :
-            candidate_atoms = self.dictionary.alphaCSCResultFromDict(signal_dict, nb_activations=candidate_sparsity)
-            candidate_atoms = candidate_atoms[:candidate_sparsity]
-            sparsityVariationsAtoms[candidate_sparsity] = candidate_atoms
-
-        alphaCSC_sparVar_results = {
-            'id': signal_dict['id'],
-            'sparsityLevels': sparsity_levels,
-            'atoms': sparsityVariationsAtoms
-        }
-
-        return alphaCSC_sparVar_results
-
-    def alphaCSCSparsityVariationPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, max_sparsity:int=10, verbose:bool=False) :
-        """Create a pipeline of the alphaCSC sparsity variation results from the database of signals
-        Args:
-            input_filename (str): The name of the input file containing the signals database
-            output_filename (str): The name of the output file to store the results
-            nb_cores (int): The number of cores to use for parallel processing
-            max_sparsity (int): The maximum sparsity level to consider
-            verbose (bool): The verbosity flag
-        Returns:
-            None : it saves the results in a file
-        """
-        with open(input_filename, 'r') as json_file:
-            data = json.load(json_file)
-            if data is None:
-                raise ValueError("The input file is empty or does not contain any data.")
-        
-        if verbose :
-            print(f"MP sparVar Pipeline from {input_filename} with {len(data['mp'])} signals")
-
-        # Extract the signals from the DB
-        signals = data['signals']
-        # Create the results dictionary
-        results = dict()
-        results['source'] = input_filename
-        results['date'] = get_today_date_str()
-        results['algorithm'] = 'alphaCSC'
-        results['maxSparsity'] = max_sparsity
-        results['dictionary'] = str(self.dictionary)
-
-        # Parallelize the OMP algorithm on the signals from the DB
-        alphaCSC_sparVar_results = Parallel(n_jobs=nb_cores)(delayed(self.computeSparsityVariation_MP)(signal_dict, max_sparsity=max_sparsity, verbose=verbose) for signal_dict in tqdm(signals, desc='alphaCSC sparVar Pipeline from DB'))
-        results['results'] = alphaCSC_sparVar_results
-        # Save the results in a JSON file
-        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
-        if verbose :
-            print(f"alphaCSC sparVar Pipeline results saved in {output_filename}")
+    #
+    #             888           888                      e88~-_  ,d88~~\  e88~-_  
+    #     /~~~8e  888 888-~88e  888-~88e   /~~~8e       d888   \ 8888    d888   \ 
+    #         88b 888 888  888b 888  888       88b ____ 8888     `Y88b   8888     
+    #    e88~-888 888 888  8888 888  888  e88~-888      8888      `Y88b, 8888     
+    #   C888  888 888 888  888P 888  888 C888  888      Y888   /    8888 Y888   / 
+    #    "88_-888 888 888-_88"  888  888  "88_-888       "88_-~  \__88P'  "88_-~  
+    #                 888                                                         
+    #  
 
     def plotAlphaCSCDecomposition(self, signal_dict:dict, sparsity:int, verbose:bool=False) :
         """
@@ -2397,7 +2351,85 @@ class CSCWorkbench:
         plt.title(f'alphaCSC Decomposition with {sparsity} atoms', fontsize=16)
         plt.legend(loc='best', title='Components')
         plt.show()
-                                                                      
+
+    def alphaCSCPRCurve(self, signal_dict:dict, n_samples:int, pos_err_threshold:int, corr_err_threshold:float, verbose:bool=False) :
+        """Compute the PR curve for the Alpha-CSC algorithm
+        Args:
+            signal_dict (dict) : The signal dictionary
+            n_samples (int) : The number of samples for the PR curve
+            pos_err_threshold (int) : The position error threshold
+            corr_err_threshold (float) : The correlation error threshold
+            verbose (bool) : The verbosity flag
+        Returns:
+            pr_curve (np.ndarray) : The PR curve
+        """
+        signal = np.array(signal_dict['signal'])
+        D = self.dictionary.getLocalDictionary()
+
+        if signal.ndim == 1:
+            signal = signal[np.newaxis, :]
+
+        lmbda = 8e-4 # initial small lambda
+        activations = []
+        target_activations = 5
+        max_nb_activations = 1000
+        min_nb_activations = 1
+        prct_tolerance = 30
+
+        pr_metrics = []
+        iter = 0
+
+        if verbose : 
+            print(f'Processing signal {signal_dict["id"]}')
+            print(f'First lambda = {lmbda:.2e} : len pr_metrics = {len(pr_metrics)} & n_samples = {n_samples}')
+
+        while len(pr_metrics) < n_samples :
+
+            activations = update_z(signal, D, lmbda).squeeze()  # Assuming update_z returns the activations array
+            activations = activations.flatten()
+            nnz_indexes, = np.nonzero(activations)
+            len_activations = len(nnz_indexes)
+
+            if verbose:
+                print(f'Iteration {iter+1}: lambda = {lmbda:.2e}, number of activations = {len_activations}')
+
+            if len_activations <= max_nb_activations and len_activations >= min_nb_activations :
+
+                # Post-processing of activations
+                nnz_values = activations[nnz_indexes]
+                order = np.argsort(nnz_values)[::-1]
+                nnz_indexes_sorted = nnz_indexes[order]
+
+                # Extract atoms and their parameters
+                positions_idx, atoms_idx = np.unravel_index(nnz_indexes_sorted, shape=activations.reshape(-1, len(D)).shape)
+
+                approx_atoms = list()
+                for pos_idx, atom_idx in zip(positions_idx, atoms_idx):
+                    b, y, s = self.dictionary.atoms[atom_idx].params['b'], self.dictionary.atoms[atom_idx].params['y'], self.dictionary.atoms[atom_idx].params['sigma']
+                    approx_atoms.append({'x': pos_idx, 'b': b, 'y': y, 's': s})
+
+                # Compute the PR metrics
+                tp = self.computeMaxTruePositives(signal_dict['atoms'], approx_atoms, pos_err_threshold, corr_err_threshold)
+                precision = tp / len(approx_atoms)
+                recall = tp / len(signal_dict['atoms'])
+                pr_metrics.append([precision, recall])
+
+                if verbose :
+                    print(f' => Added PR metrics : TP = {tp}, precision = {tp}/{len(approx_atoms)}={precision}, recall = {tp}/{len(signal_dict["atoms"])}={recall}')
+
+            # Update lambda based on the difference between current and target activations
+            if len_activations > target_activations:
+                last_lmbda = lmbda
+                lmbda *= 1 + 0.01*(len_activations - target_activations) / target_activations
+            else:
+                last_lmbda_coeff = 0.98
+                lmbda = (1 - last_lmbda_coeff) * lmbda + last_lmbda_coeff * last_lmbda
+
+            iter += 1
+            
+        pr_curve = np.array(pr_metrics)
+        return pr_curve
+                                                                
     #         ________  ________  ________  ________  ___      ___ ________  ________     
     #       |\   ____\|\   __  \|\   __  \|\   __  \|\  \    /  /|\   __  \|\   __  \    
     #        \ \  \___|\ \  \|\  \ \  \|\  \ \  \|\  \ \  \  /  / | \  \|\  \ \  \|\  \   
@@ -2440,7 +2472,7 @@ class CSCWorkbench:
 
         return np.array(pr_metrics)
     
-    def computeSparVarMetricsFromDB(self, sparvar_db_path:str, results_key:str, pos_err_threshold:int, corr_err_threshold:float, verbose:bool=False) -> Tuple[List[float], List[float]] :
+    def computeSparVarMetricsFromDB(self, sparvar_db_path:str, results_key:str, pos_err_threshold:int, corr_err_threshold:float, sparsity_criteria:int, snr_criteria:int, verbose:bool=False) -> Tuple[List[float], List[float]] :
         """
         Compute the precisions-recalls metrics from a sparsity variation database
         Args :
@@ -2467,10 +2499,27 @@ class CSCWorkbench:
             sparvar_results = sparvar_db[results_key]
             max_sparsity = sparvar_db['maxSparsityLevel']
 
+        def signal_condition(sparsity, snr) :
+            if sparsity_criteria == -1 and snr_criteria != -1 :
+                return (snr == snr_criteria)
+            elif sparsity_criteria != -1 and snr_criteria == -1 :
+                return (sparsity == sparsity_criteria)
+            elif sparsity_criteria != -1 and snr_criteria != -1 :
+                return (sparsity == sparsity_criteria) and (snr == snr_criteria)
+            return True
+
         pr_results = [] # List of np.array of [precision, recall] metrics
         for result_dict in sparvar_results :
-            pr_array = self.computeSparVarMetricsFromDict(result_dict, pos_err_threshold, corr_err_threshold)
-            pr_results.append(pr_array)
+            signal_id = result_dict['id']
+            signal_dict = self.signalDictFromId(signal_id)
+            signal_sparsity, signal_snr = len(signal_dict['atoms']), signal_dict['snr']
+            if signal_condition(signal_sparsity, signal_snr) :
+                pr_array = self.computeSparVarMetricsFromDict(
+                    result_dict,
+                    pos_err_threshold,
+                    corr_err_threshold
+                )
+                pr_results.append(pr_array)
 
         pr_mean, pr_mean_plus_std, pr_mean_minus_std = CSCWorkbench.computeMeanPRCurve(pr_results, max_sparsity)
         return pr_mean, pr_mean_plus_std, pr_mean_minus_std
@@ -2484,12 +2533,18 @@ class CSCWorkbench:
         sparvar_db_paths = {}
         verbose = False
         fill = False
+        snr_criteria = -1
+        sparsity_criteria = -1
 
         for key, value in kwargs.items() :
             if key == 'pos_err_threshold' :
                 pos_err_threshold = value
             elif key == 'corr_err_threshold' :
                 corr_err_threshold = value
+            elif key == 'sparsity_criteria' :
+                sparsity_criteria = value
+            elif key == 'snr_criteria' :
+                snr_criteria = value
             elif key == 'verbose' :
                 verbose = value
             elif key == 'fill' :
@@ -2505,6 +2560,8 @@ class CSCWorkbench:
                 results_key = str(algorithm),
                 pos_err_threshold = pos_err_threshold,
                 corr_err_threshold = corr_err_threshold,
+                sparsity_criteria = sparsity_criteria,
+                snr_criteria = snr_criteria,
                 verbose=verbose
                 )
             CSCWorkbench.plotPRCurve(pr_mean, ax=ax, color=f'C{i}', label='CSC-'+str(algorithm).upper())
@@ -2518,4 +2575,223 @@ class CSCWorkbench:
         plt.xlabel('Recall', fontsize=14)
         plt.ylabel('Precision', fontsize=14)
         plt.grid(alpha=0.5)
-        plt.show()                                                                                                                                                                                                                    
+        plt.show() 
+
+                                                        
+    #       ,o888888o.    8 888888888o.      8 888888888o.      
+    #      8888     `88.  8 8888    `^888.   8 8888    `^888.   
+    #   ,8 8888       `8. 8 8888        `88. 8 8888        `88. 
+    #   88 8888           8 8888         `88 8 8888         `88 
+    #   88 8888           8 8888          88 8 8888          88 
+    #   88 8888           8 8888          88 8 8888          88 
+    #   88 8888           8 8888         ,88 8 8888         ,88 
+    #   `8 8888       .8' 8 8888        ,88' 8 8888        ,88' 
+    #      8888     ,88'  8 8888    ,o88P'   8 8888    ,o88P'   
+    #       `8888888P'    8 888888888P'      8 888888888P'      
+
+    def computeCDCTruePositivesFromDB(self, sparvar_db_path:str, results_key:str, pos_err_threshold:int, corr_err_threshold:float, sparsity_criteria:int, snr_criteria:int, verbose:bool=False) -> Tuple[List[float], List[float]] :
+        """
+        Compute the precisions-recalls metrics from a sparsity variation database
+        Args :
+            sparvar_db_path (str) : The path to the sparsity variation database
+            results_key (str) : The key of the results in the database
+            pos_err_threshold (int) : The position error threshold
+            corr_err_threshold (float) : The correlation error threshold
+            verbose (bool) : The verbosity flag
+        Returns :
+            pr_mean : numpy.ndarray
+                A 2D array where the first column contains the mean precision values
+                and the second column contains the corresponding recall values.
+            pr_mean_plus_std : numpy.ndarray
+                A 2D array where the first column contains the mean precision values
+                plus one standard deviation and the second column contains the
+                corresponding recall values.
+            pr_mean_minus_std : numpy.ndarray
+                A 2D array where the first column contains the mean precision values
+                minus one standard deviation and the second column contains the
+                corresponding recall values.
+        """
+        with open(sparvar_db_path, 'r') as f:
+            sparvar_db = json.load(f)
+            sparvar_results = sparvar_db[results_key]
+
+        def signal_condition(sparsity, snr) :
+            if sparsity_criteria == -1 and snr_criteria != -1 :
+                return (snr == snr_criteria)
+            elif sparsity_criteria != -1 and snr_criteria == -1 :
+                return (sparsity == sparsity_criteria)
+            elif sparsity_criteria != -1 and snr_criteria != -1 :
+                return (sparsity == sparsity_criteria) and (snr == snr_criteria)
+            return True
+
+        tp_results = [] # List of int of true_positives metrics
+        # Iterate over the result_dict of each signal in the sparvar_results
+        for result_dict in sparvar_results :
+            signal_id = result_dict['id']
+            signal_dict = self.signalDictFromId(signal_id)
+            signal_sparsity, signal_snr = len(signal_dict['atoms']), signal_dict['snr']
+            # Check if the signal satisfies the criteria
+            if signal_condition(signal_sparsity, signal_snr) :
+                true_atoms = signal_dict['atoms']
+                approx_atoms = result_dict['results'][signal_sparsity-1]['atoms']
+                tp = self.computeMaxTruePositives(true_atoms, approx_atoms, pos_err_threshold, corr_err_threshold)
+                tp_results.append(tp)
+
+        return tp_results
+        
+    def criticalDifferenceDiagramFromDB(self, **kwargs) :
+        """
+        Plot the critical difference diagram from the results of any sparVar database. 
+        """
+        pos_err_threshold = 20
+        corr_err_threshold = 0.75
+        sparvar_db_paths = {}
+        verbose = False
+        fill = False
+        snr_criteria = -1
+        sparsity_criteria = -1
+
+        for key, value in kwargs.items() :
+            if key == 'pos_err_threshold' :
+                pos_err_threshold = value
+            elif key == 'corr_err_threshold' :
+                corr_err_threshold = value
+            elif key == 'sparsity_criteria' :
+                sparsity_criteria = value
+            elif key == 'snr_criteria' :
+                snr_criteria = value
+            elif key == 'verbose' :
+                verbose = value
+            elif key == 'fill' :
+                fill = value
+            else :
+                sparvar_db_paths[str(key).lower()] = value
+
+        tp_values_per_algo = []
+
+        for i, (algorithm, path) in enumerate(sparvar_db_paths.items()) :
+            if verbose :
+                print(f'\nProcessing {algorithm.upper()} results from {path}')
+            tp_values = self.computeCDCTruePositivesFromDB(
+                sparvar_db_path = path,
+                results_key = str(algorithm),
+                pos_err_threshold = pos_err_threshold,
+                corr_err_threshold = corr_err_threshold,
+                sparsity_criteria = sparsity_criteria,
+                snr_criteria = snr_criteria,
+                verbose=verbose
+                )
+            tp_values_per_algo.append(tp_values)
+            if verbose :
+                print(f'  => {algorithm.upper()} {len(tp_values)} results.')
+
+        if verbose :
+            print(f'\nComputing the critical difference diagram for {len(tp_values_per_algo)} algorithms')
+            print(f'  => {tp_values_per_algo}')
+
+        # Calculate ranks
+        ranks = np.array([stats.rankdata(-np.array(tps)) for tps in zip(*tp_values_per_algo)])
+        mean_ranks = np.mean(ranks, axis=0)
+
+        if verbose :
+            print(f'  => Ranks : {ranks}')
+            print(f'  => Mean ranks : {mean_ranks}')
+
+        # Perform Friedman test
+        friedman_stat, p_value = stats.friedmanchisquare(*tp_values_per_algo)
+        print(f"Friedman statistic: {friedman_stat}, p-value: {p_value}")
+
+        # If the Friedman test is significant, perform Nemenyi post-hoc test
+        if p_value < 0.05:
+            # Names of the algorithms
+            names = list(sparvar_db_paths.keys())
+            
+            # Perform Nemenyi post-hoc test and plot the CD diagram
+            cd_diagram = sp.posthoc_nemenyi_friedman(tp_values_per_algo)
+            sp.sign_plot(cd_diagram, names, alpha=0.05)
+            plt.show()
+        else:
+            print("No significant difference detected by the Friedman test.")
+
+    def criticalDifferenceDiagramFromDB(self, **kwargs) :
+        """
+        Plot the critical difference diagram from the results of any sparVar database. 
+        """
+        pos_err_threshold = 20
+        corr_err_threshold = 0.75
+        sparvar_db_paths = {}
+        verbose = False
+        snr_criteria = -1
+        sparsity_criteria = -1
+        file_title = "example"
+
+        for key, value in kwargs.items() :
+            if key == 'pos_err_threshold' :
+                pos_err_threshold = value
+            elif key == 'corr_err_threshold' :
+                corr_err_threshold = value
+            elif key == 'sparsity_criteria' :
+                sparsity_criteria = value
+            elif key == 'snr_criteria' :
+                snr_criteria = value
+            elif key == 'verbose' :
+                verbose = value
+            elif key == 'file_title' :
+                file_title = value
+            else :
+                sparvar_db_paths[str(key).lower()] = value
+
+        tp_values_per_algo = {}
+
+        for i, (algorithm, path) in enumerate(sparvar_db_paths.items()) :
+            if verbose :
+                print(f'\nProcessing {algorithm.upper()} results from {path}')
+            tp_values = self.computeCDCTruePositivesFromDB(
+                sparvar_db_path = path,
+                results_key = str(algorithm),
+                pos_err_threshold = pos_err_threshold,
+                corr_err_threshold = corr_err_threshold,
+                sparsity_criteria = sparsity_criteria,
+                snr_criteria = snr_criteria,
+                verbose=verbose
+                )
+            label = f'conv-{algorithm.upper()}'
+            tp_values_per_algo[label] = tp_values
+
+        # Create a DataFrame from the dictionary
+        df = pd.DataFrame(tp_values_per_algo)
+
+        # create a CD diagram from the Pandas DataFrame
+        diagram = Diagram(
+            df.to_numpy(),
+            treatment_names = df.columns,
+            maximize_outcome = True
+        )
+
+        diagram.average_ranks # the average rank of each treatment
+        diagram.get_groups(alpha=.05, adjustment="holm")
+
+        diag_title = "CSC algorithms critical difference diagram"
+        if snr_criteria != -1 :
+            diag_title += f" + snr={snr_criteria}"
+        if sparsity_criteria != -1 :
+            diag_title += f" + spar={sparsity_criteria}"
+
+        # export the diagram to a file
+        diagram.to_file(
+            f"{file_title}.pdf",
+            alpha = .05,
+            adjustment = "holm",
+            reverse_x = True,
+            axis_options = {"title": diag_title},
+        )
+
+    #   \documentclass{article}
+    #   \usepackage{graphicx} % Required for inserting images
+    #   \usepackage{graphicx} % Required for inserting images
+    #   \usepackage{pgfplots} % Required for creating plots
+    #   \usepackage{tikz} % Required for drawing in TikZ
+    #   
+    #   \begin{document}
+
+        

@@ -16,7 +16,6 @@ from scipy.signal import oaconvolve
 
 from joblib import Parallel, delayed
 
-import sporco.admm.cbpdn as cbpdn
 from alphacsc.update_z import update_z
 
 from .atoms import ZSAtom
@@ -1180,6 +1179,7 @@ class ZSDictionary() :
             activations = activations.flatten()
             nnz_indexes, = np.nonzero(activations)
             len_activations = len(nnz_indexes)
+
             if len_activations > 0:
                 last_nnz_activations = activations[nnz_indexes]
 
@@ -1218,4 +1218,3 @@ class ZSDictionary() :
             results.append({'x': pos_idx, 'b': b, 'y': y, 's': s})
 
         return results
-
