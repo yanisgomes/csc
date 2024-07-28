@@ -1,0 +1,46 @@
+\documentclass[tikz,margin=.1in]{standalone}
+\usepackage{pgfplots,lmodern}
+\pgfplotsset{compat=newest}
+
+\begin{document}
+\begin{tikzpicture}[
+  treatment line/.style={rounded corners=1.5pt, line cap=round, shorten >=1pt},
+  treatment label/.style={font=\small},
+  group line/.style={ultra thick},
+]
+
+\begin{axis}[
+  clip={false},
+  axis x line={center},
+  axis y line={none},
+  axis line style={-},
+  xmin={1},
+  ymax={0},
+  scale only axis={true},
+  width={\axisdefaultwidth},
+  ticklabel style={anchor=south, yshift=1.3*\pgfkeysvalueof{/pgfplots/major tick length}, font=\small},
+  every tick/.style={draw=black},
+  major tick style={yshift=.5*\pgfkeysvalueof{/pgfplots/major tick length}},
+  minor tick style={yshift=.5*\pgfkeysvalueof{/pgfplots/minor tick length}},
+  title style={yshift=\baselineskip},
+  xmax={4},
+  ymin={-3.5},
+  height={4\baselineskip},
+  xtick={1,2,3,4},
+  minor x tick num={3},
+  x dir={reverse},
+  title={CSC algorithms critical difference diagram},
+]
+
+\draw[treatment line] ([yshift=-2pt] axis cs:2.18125, 0) |- (axis cs:1.8479166666666667, -2.0)
+  node[treatment label, anchor=west] {conv-MMP27};
+\draw[treatment line] ([yshift=-2pt] axis cs:2.21421875, 0) |- (axis cs:1.8479166666666667, -3.0)
+  node[treatment label, anchor=west] {conv-MMP10};
+\draw[treatment line] ([yshift=-2pt] axis cs:2.5478125, 0) |- (axis cs:3.3900520833333334, -3.0)
+  node[treatment label, anchor=east] {conv-OMP};
+\draw[treatment line] ([yshift=-2pt] axis cs:3.05671875, 0) |- (axis cs:3.3900520833333334, -2.0)
+  node[treatment label, anchor=east] {conv-MP};
+
+\end{axis}
+\end{tikzpicture}
+\end{document}

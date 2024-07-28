@@ -2638,92 +2638,25 @@ class CSCWorkbench:
                 tp_results.append(tp)
 
         return tp_results
-        
-    def criticalDifferenceDiagramFromDB(self, **kwargs) :
-        """
-        Plot the critical difference diagram from the results of any sparVar database. 
-        """
-        pos_err_threshold = 20
-        corr_err_threshold = 0.75
-        sparvar_db_paths = {}
-        verbose = False
-        fill = False
-        snr_criteria = -1
-        sparsity_criteria = -1
-
-        for key, value in kwargs.items() :
-            if key == 'pos_err_threshold' :
-                pos_err_threshold = value
-            elif key == 'corr_err_threshold' :
-                corr_err_threshold = value
-            elif key == 'sparsity_criteria' :
-                sparsity_criteria = value
-            elif key == 'snr_criteria' :
-                snr_criteria = value
-            elif key == 'verbose' :
-                verbose = value
-            elif key == 'fill' :
-                fill = value
-            else :
-                sparvar_db_paths[str(key).lower()] = value
-
-        tp_values_per_algo = []
-
-        for i, (algorithm, path) in enumerate(sparvar_db_paths.items()) :
-            if verbose :
-                print(f'\nProcessing {algorithm.upper()} results from {path}')
-            tp_values = self.computeCDCTruePositivesFromDB(
-                sparvar_db_path = path,
-                results_key = str(algorithm),
-                pos_err_threshold = pos_err_threshold,
-                corr_err_threshold = corr_err_threshold,
-                sparsity_criteria = sparsity_criteria,
-                snr_criteria = snr_criteria,
-                verbose=verbose
-                )
-            tp_values_per_algo.append(tp_values)
-            if verbose :
-                print(f'  => {algorithm.upper()} {len(tp_values)} results.')
-
-        if verbose :
-            print(f'\nComputing the critical difference diagram for {len(tp_values_per_algo)} algorithms')
-            print(f'  => {tp_values_per_algo}')
-
-        # Calculate ranks
-        ranks = np.array([stats.rankdata(-np.array(tps)) for tps in zip(*tp_values_per_algo)])
-        mean_ranks = np.mean(ranks, axis=0)
-
-        if verbose :
-            print(f'  => Ranks : {ranks}')
-            print(f'  => Mean ranks : {mean_ranks}')
-
-        # Perform Friedman test
-        friedman_stat, p_value = stats.friedmanchisquare(*tp_values_per_algo)
-        print(f"Friedman statistic: {friedman_stat}, p-value: {p_value}")
-
-        # If the Friedman test is significant, perform Nemenyi post-hoc test
-        if p_value < 0.05:
-            # Names of the algorithms
-            names = list(sparvar_db_paths.keys())
-            
-            # Perform Nemenyi post-hoc test and plot the CD diagram
-            cd_diagram = sp.posthoc_nemenyi_friedman(tp_values_per_algo)
-            sp.sign_plot(cd_diagram, names, alpha=0.05)
-            plt.show()
-        else:
-            print("No significant difference detected by the Friedman test.")
 
     def criticalDifferenceDiagramFromDB(self, **kwargs) :
         """
         Plot the critical difference diagram from the results of any sparVar database. 
         """
-        pos_err_threshold = 20
+        pos_err_threshold = 10
         corr_err_threshold = 0.75
         sparvar_db_paths = {}
         verbose = False
         snr_criteria = -1
         sparsity_criteria = -1
         file_title = "example"
+
+        def remove_digit(input_string):
+            result = ""
+            for char in input_string:
+                if not char.isdigit():
+                    result += char
+            return result
 
         for key, value in kwargs.items() :
             if key == 'pos_err_threshold' :
@@ -2746,9 +2679,10 @@ class CSCWorkbench:
         for i, (algorithm, path) in enumerate(sparvar_db_paths.items()) :
             if verbose :
                 print(f'\nProcessing {algorithm.upper()} results from {path}')
+            results_key = remove_digit(algorithm)
             tp_values = self.computeCDCTruePositivesFromDB(
                 sparvar_db_path = path,
-                results_key = str(algorithm),
+                results_key = results_key,
                 pos_err_threshold = pos_err_threshold,
                 corr_err_threshold = corr_err_threshold,
                 sparsity_criteria = sparsity_criteria,
@@ -2785,13 +2719,4 @@ class CSCWorkbench:
             reverse_x = True,
             axis_options = {"title": diag_title},
         )
-
-    #   \documentclass{article}
-    #   \usepackage{graphicx} % Required for inserting images
-    #   \usepackage{graphicx} % Required for inserting images
-    #   \usepackage{pgfplots} % Required for creating plots
-    #   \usepackage{tikz} % Required for drawing in TikZ
-    #   
-    #   \begin{document}
-
         
