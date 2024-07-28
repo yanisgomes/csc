@@ -2515,12 +2515,18 @@ class CSCWorkbench:
             print(f'    Indices with max tp: {max_tp_indexes}')
 
         # Find the shortest list of atoms among those with the max tp
-        shortest_list = min([list_atoms[i] for i in max_tp_indexes], key=len)
+        approx_atoms = min([list_atoms[i] for i in max_tp_indexes], key=len)
         
         if verbose:
-            print(f'    Shortest list among max tp: {shortest_list}')
+            print(f'    Shortest list among max tp: {approx_atoms}')
+
+        results_dict = {
+            'id': signal_dict['id'],
+            'snr': signal_dict['snr'],
+            'atoms': approx_atoms
+        }
         
-        return shortest_list
+        return results_dict
 
     def alphaCSCPipelineFromSignalsDB(self, output_filename:str, nb_cores:int, n_samples:int, pos_err_threshold:int, corr_err_threshold:float, verbose:bool=False) :
         """Create a pipeline of the AlphaCSC-L1 algorithm from the database of signals.
@@ -2763,7 +2769,7 @@ class CSCWorkbench:
     
     def computeCDCTruePositivesFromAlphaCSC(self, alphaCSC_db_path:str, results_key:str, pos_err_threshold:int, corr_err_threshold:float, sparsity_criteria:int, snr_criteria:int, verbose:bool=False) -> Tuple[List[float], List[float]] :
         """
-        Compute the precisions-recalls metrics from a alpha CSC results database
+        Compute the true positives metrics from a alpha CSC results database
         Args :
             sparvar_db_path (str) : The path to the sparsity variation database
             results_key (str) : The key of the results in the database
@@ -2794,7 +2800,8 @@ class CSCWorkbench:
             signal_sparsity, signal_snr = len(signal_dict['atoms']), signal_dict['snr']
             # Check if the signal satisfies the criteria
             if signal_condition(signal_sparsity, signal_snr) :
-                tp = result_dict['tp']
+                true_atoms = signal_dict['atoms']
+                approx_atoms = result_dict['atoms']
                 tp = self.computeMaxTruePositives(true_atoms, approx_atoms, pos_err_threshold, corr_err_threshold)
                 tp_results.append(tp)
 
@@ -2839,19 +2846,32 @@ class CSCWorkbench:
 
         for i, (algorithm, path) in enumerate(sparvar_db_paths.items()) :
             if verbose :
-                print(f'\nProcessing {algorithm.upper()} results from {path}')
-            results_key = remove_digit(algorithm)
-            tp_values = self.computeCDCTruePositivesFromDB(
-                sparvar_db_path = path,
-                results_key = results_key,
-                pos_err_threshold = pos_err_threshold,
-                corr_err_threshold = corr_err_threshold,
-                sparsity_criteria = sparsity_criteria,
-                snr_criteria = snr_criteria,
-                verbose=verbose
-                )
-            label = f'conv-{algorithm.upper()}'
-            tp_values_per_algo[label] = tp_values
+                    print(f'\nProcessing {algorithm.upper()} results from {path}')
+            if algorithm != 'l1' :
+                results_key = remove_digit(algorithm)
+                tp_values = self.computeCDCTruePositivesFromDB(
+                    sparvar_db_path = path,
+                    results_key = results_key,
+                    pos_err_threshold = pos_err_threshold,
+                    corr_err_threshold = corr_err_threshold,
+                    sparsity_criteria = sparsity_criteria,
+                    snr_criteria = snr_criteria,
+                    verbose=verbose
+                    )
+                label = f'conv-{algorithm.upper()}'
+                tp_values_per_algo[label] = tp_values
+            else :
+                tp_values = self.computeCDCTruePositivesFromAlphaCSC(
+                    alphaCSC_db_path = path,
+                    results_key = 'results',
+                    pos_err_threshold = pos_err_threshold,
+                    corr_err_threshold = corr_err_threshold,
+                    sparsity_criteria = sparsity_criteria,
+                    snr_criteria = snr_criteria,
+                    verbose=verbose
+                    )
+                label = f'CSC-{algorithm.upper()}'
+                tp_values_per_algo[label] = tp_values
 
         # Create a DataFrame from the dictionary
         df = pd.DataFrame(tp_values_per_algo)
