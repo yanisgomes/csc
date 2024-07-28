@@ -1110,7 +1110,7 @@ class ZSDictionary() :
             print(f"MMP-DF Pipeline results saved in {output_filename}")
 
     def mmpdfSparVarPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, connections:int=3, dissimilarity:float=0.8, branches:int=10, max_sparsity:int=10, verbose=False) :
-        """Create a pipeline of the OMP algorithm from the database of signals.
+        """Create a pipeline of the MMP-DF algorithm from the database of signals.
         Args:
             input_filename (str): The name of the input file containing the signals database
             output_filename (str): The name of the output file to store the results

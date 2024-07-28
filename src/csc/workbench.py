@@ -2429,6 +2429,138 @@ class CSCWorkbench:
             
         pr_curve = np.array(pr_metrics)
         return pr_curve
+
+    def alphaCSCResultFromDict(self, signal_dict:dict, n_samples:int, pos_err_threshold:int, corr_err_threshold:float, verbose:bool=False) :
+        """Compute the PR curve for the Alpha-CSC algorithm
+        Args:
+            signal_dict (dict) : The signal dictionary
+            n_samples (int) : The number of samples for the PR curve
+            sparsity
+            pos_err_threshold (int) : The position error threshold
+            corr_err_threshold (float) : The correlation error threshold
+            verbose (bool) : The verbosity flag
+        Returns:
+            atoms (List[dict]) : The atoms that maximize the TP value
+        """
+        signal = np.array(signal_dict['signal'])
+        D = self.dictionary.getLocalDictionary()
+
+        if signal.ndim == 1:
+            signal = signal[np.newaxis, :]
+
+        lmbda = 8e-4 # initial small lambda
+        activations = []
+        target_activations = len(signal_dict['atoms'])
+        max_nb_activations = 100
+        min_nb_activations = 1
+
+        pr_metrics = []
+        iter = 0
+
+        list_tp = []
+        list_atoms = []
+
+        if verbose : 
+            print(f'Processing signal {signal_dict["id"]}')
+
+        while len(list_tp) < n_samples :
+
+            activations = update_z(signal, D, lmbda).squeeze()  # Assuming update_z returns the activations array
+            activations = activations.flatten()
+            nnz_indexes, = np.nonzero(activations)
+            len_activations = len(nnz_indexes)
+
+            if verbose:
+                print(f'Iteration {iter+1}: lambda = {lmbda:.2e}, number of activations = {len_activations}')
+
+            if len_activations <= max_nb_activations and len_activations >= min_nb_activations :
+
+                # Post-processing of activations
+                nnz_values = activations[nnz_indexes]
+                order = np.argsort(nnz_values)[::-1]
+                nnz_indexes_sorted = nnz_indexes[order]
+
+                # Extract atoms and their parameters
+                positions_idx, atoms_idx = np.unravel_index(nnz_indexes_sorted, shape=activations.reshape(-1, len(D)).shape)
+
+                approx_atoms = list()
+                for pos_idx, atom_idx in zip(positions_idx, atoms_idx):
+                    b, y, s = self.dictionary.atoms[atom_idx].params['b'], self.dictionary.atoms[atom_idx].params['y'], self.dictionary.atoms[atom_idx].params['sigma']
+                    approx_atoms.append({'x': pos_idx, 'b': b, 'y': y, 's': s})
+
+                # Compute the PR metrics
+                tp = self.computeMaxTruePositives(signal_dict['atoms'], approx_atoms, pos_err_threshold, corr_err_threshold)
+                list_tp.append(tp)
+                list_atoms.append(approx_atoms)
+
+                if verbose :
+                    print(f'    {len(list_tp)}/{n_samples} => {len(approx_atoms)} new atoms append to results')
+            
+            # Update lambda based on the difference between current and target activations
+            if len_activations > target_activations:
+                last_lmbda = lmbda
+                lmbda *= 1 + 0.01*(len_activations - target_activations) / target_activations
+            else:
+                last_lmbda_coeff = 0.98
+                lmbda = (1 - last_lmbda_coeff) * lmbda + last_lmbda_coeff * last_lmbda
+
+            iter += 1
+
+        max_tp = max(list_tp)
+        max_tp_indexes = [i for i, tp in enumerate(list_tp) if tp == max_tp]
+
+        if verbose:
+            print(f'    List tp for samples: {list_tp}')
+            print(f'    Max tp value: {max_tp}')
+            print(f'    Indices with max tp: {max_tp_indexes}')
+
+        # Find the shortest list of atoms among those with the max tp
+        shortest_list = min([list_atoms[i] for i in max_tp_indexes], key=len)
+        
+        if verbose:
+            print(f'    Shortest list among max tp: {shortest_list}')
+        
+        return shortest_list
+
+    def alphaCSCPipelineFromSignalsDB(self, output_filename:str, nb_cores:int, n_samples:int, pos_err_threshold:int, corr_err_threshold:float, verbose:bool=False) :
+        """Create a pipeline of the AlphaCSC-L1 algorithm from the database of signals.
+        Args:
+            input_filename (str): The name of the input file containing the signals database
+            output_filename (str): The name of the output file to store the results
+        Returns:
+            None : it saves the results in a file
+        """
+        with open(self.signals_path, 'r') as json_file:
+            data = json.load(json_file)
+            if data is None:
+                raise ValueError("The input file is empty or does not contain any data.")
+        
+        if verbose :
+            print(f"AlphaCSC Pipeline from {self.signals_path} with {len(data['signals'])} signals")
+
+        # Extract the signals from the DB
+        signals = data['signals']
+        # Create the results dictionary
+        results = dict()
+        results['source'] = self.signals_path
+        results['date'] = get_today_date_str()
+        results['algorithm'] = 'Convolutional MMP-DF'
+        results['nbSamples'] = n_samples
+        results['posErrThreshold'] = pos_err_threshold
+        results['corrErrThreshold'] = corr_err_threshold
+        results['batchSize'] = data['batchSize']
+        results['snrLevels'] = data['snrLevels']
+        results['signalLength'] = data['signalLength']
+        results['sparsityLevels'] = data['sparsityLevels']
+        results['dictionary'] = str(self)
+
+        # Parallelize the OMP algorithm on the signals from the DB
+        mmpdf_results = Parallel(n_jobs=nb_cores)(delayed(self.alphaCSCResultFromDict)(signal_dict, n_samples=n_samples, pos_err_threshold=pos_err_threshold, corr_err_threshold=corr_err_threshold, verbose=verbose) for signal_dict in tqdm(signals, desc='AlphaCSC Pipeline from DB'))
+        results['results'] = mmpdf_results
+        # Save the results in a JSON file
+        json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)
+        if verbose :
+            print(f"AlphaCSC Pipeline results saved in {output_filename}")
                                                                 
     #         ________  ________  ________  ________  ___      ___ ________  ________     
     #       |\   ____\|\   __  \|\   __  \|\   __  \|\  \    /  /|\   __  \|\   __  \    
@@ -2599,17 +2731,7 @@ class CSCWorkbench:
             corr_err_threshold (float) : The correlation error threshold
             verbose (bool) : The verbosity flag
         Returns :
-            pr_mean : numpy.ndarray
-                A 2D array where the first column contains the mean precision values
-                and the second column contains the corresponding recall values.
-            pr_mean_plus_std : numpy.ndarray
-                A 2D array where the first column contains the mean precision values
-                plus one standard deviation and the second column contains the
-                corresponding recall values.
-            pr_mean_minus_std : numpy.ndarray
-                A 2D array where the first column contains the mean precision values
-                minus one standard deviation and the second column contains the
-                corresponding recall values.
+            tp_results : List[float] : The list of true positives metrics
         """
         with open(sparvar_db_path, 'r') as f:
             sparvar_db = json.load(f)
@@ -2634,6 +2756,45 @@ class CSCWorkbench:
             if signal_condition(signal_sparsity, signal_snr) :
                 true_atoms = signal_dict['atoms']
                 approx_atoms = result_dict['results'][signal_sparsity-1]['atoms']
+                tp = self.computeMaxTruePositives(true_atoms, approx_atoms, pos_err_threshold, corr_err_threshold)
+                tp_results.append(tp)
+
+        return tp_results
+    
+    def computeCDCTruePositivesFromAlphaCSC(self, alphaCSC_db_path:str, results_key:str, pos_err_threshold:int, corr_err_threshold:float, sparsity_criteria:int, snr_criteria:int, verbose:bool=False) -> Tuple[List[float], List[float]] :
+        """
+        Compute the precisions-recalls metrics from a alpha CSC results database
+        Args :
+            sparvar_db_path (str) : The path to the sparsity variation database
+            results_key (str) : The key of the results in the database
+            pos_err_threshold (int) : The position error threshold
+            corr_err_threshold (float) : The correlation error threshold
+            verbose (bool) : The verbosity flag
+        Returns :
+            tp_results : List[float] : The list of true positives metrics
+        """
+        with open(alphaCSC_db_path, 'r') as f:
+            sparvar_db = json.load(f)
+            sparvar_results = sparvar_db[results_key]
+
+        def signal_condition(sparsity, snr) :
+            if sparsity_criteria == -1 and snr_criteria != -1 :
+                return (snr == snr_criteria)
+            elif sparsity_criteria != -1 and snr_criteria == -1 :
+                return (sparsity == sparsity_criteria)
+            elif sparsity_criteria != -1 and snr_criteria != -1 :
+                return (sparsity == sparsity_criteria) and (snr == snr_criteria)
+            return True
+
+        tp_results = [] # List of int of true_positives metrics
+        # Iterate over the result_dict of each signal in the sparvar_results
+        for result_dict in sparvar_results :
+            signal_id = result_dict['id']
+            signal_dict = self.signalDictFromId(signal_id)
+            signal_sparsity, signal_snr = len(signal_dict['atoms']), signal_dict['snr']
+            # Check if the signal satisfies the criteria
+            if signal_condition(signal_sparsity, signal_snr) :
+                tp = result_dict['tp']
                 tp = self.computeMaxTruePositives(true_atoms, approx_atoms, pos_err_threshold, corr_err_threshold)
                 tp_results.append(tp)
 
