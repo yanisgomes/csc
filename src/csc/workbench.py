@@ -1433,10 +1433,7 @@ class CSCWorkbench:
                 verbose = value
             else :
                 raise ValueError(f'Unknown algorithm type : {key}')
-
-        if verbose : 
-            print(f'Overlap intervals dataframes :\n{overlap_intervals_df}')
-
+            
         concatenated_df = pd.concat([pd.DataFrame(data) for data in overlap_intervals_df.values()], keys=['conv-' + str(key).upper() for key in overlap_intervals_df.keys()])
         concatenated_df = concatenated_df.reset_index(level=0).rename(columns={'level_0': 'algo_type'})
         if snr_criteria != -1 :
