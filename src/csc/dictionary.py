@@ -446,10 +446,11 @@ class ZSDictionary() :
         offset = params_dict['x']
         return self.getActivationIdxFromAtom(atom, offset)
 
-    def getSignalProjectionFromAtoms(self, signal:np.ndarray, atoms_dicts:List[dict]) -> np.ndarray:
+    def getSignalProjectionFromAtoms(self, signal:np.ndarray, atoms_dicts:List[dict]) -> Tuple[np.ndarray, np.ndarray]:
         """Project the activations on the dictionary
         Args:
-            activations (np.ndarray): The activations of the signal
+            signal (np.ndarray): The input signal to project on the dictionary
+            atoms_dicts (List[dict]): The list of the atoms parameters to project
         Returns:
             approx (np.ndarray): The projection of the activations on the dictionary
             activations (np.ndarray): The activations of the signal

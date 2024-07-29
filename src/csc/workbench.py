@@ -1332,147 +1332,129 @@ class CSCWorkbench:
         fig.colorbar(sm, ax=axs, orientation='vertical', label='Overlap level', pad=0.01)
         plt.show()
 
-    def computeMMPDFLocalMSEPerOverlapInterval(self, db_path:str) -> Dict:
+    #   .__                                                               .__                 
+    #   |__| ____ _____    ______ ____________     _______  __ ___________|  | _____  ______  
+    #   |  |/ ___\\__  \  /  ___//  ___/\____ \   /  _ \  \/ // __ \_  __ \  | \__  \ \____ \ 
+    #   |  \  \___ / __ \_\___ \ \___ \ |  |_> > (  <_> )   /\  ___/|  | \/  |__/ __ \|  |_> >
+    #   |__|\___  >____  /____  >____  >|   __/   \____/ \_/  \___  >__|  |____(____  /   __/ 
+    #           \/     \/     \/     \/ |__|                      \/                \/|__|    
+
+
+    def computeMSEPerOverlapInterval(self, sparVar_db_path:str, results_key:str, orthogonal_projection:bool=True, verbose:bool=False) -> Dict:
         """
         Compute the MSE per overlap interval.
         Each row corresponds to an overlap interval.
+        Args :
+            sparVar_db_path (str) : Path to the sparse variables database.
+            results_key (str) : Key of the results in the database.
+            orthogonal_projection (bool) : If True, the approximation is computed with an orthogonal projection on the dictionary.
         """
         # Load the data
-        with open(db_path, 'r') as f:
+        with open(sparVar_db_path, 'r') as f:
             output_data = json.load(f)
 
         data_overlap_intervals = {
             'id': [],
             'snr': [],
             'overlap': [],
-            'local_mse': [],
-            'algo_type': []
+            'local_mse': []
         }
         # Iterate over the outputs
-        for result in output_data['mmp'] :
+        for result in tqdm(output_data[results_key], desc=f"Processing {results_key.upper()}"):
 
             # Reconstruct the denoised signal
             signal_id = result['id']
             signal_dict = self.signalDictFromId(signal_id)
             signal_atoms = signal_dict['atoms']
-            true_signal = np.zeros_like(signal_dict['signal'])
+            signal_sparsity = len(signal_atoms)
+            noisy_signal = np.array(signal_dict['signal'])
+            true_signal = np.zeros_like(noisy_signal)
             for atom in signal_atoms:
-
                 zs_atom = ZSAtom.from_dict(atom)
                 zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
-                true_signal += atom_signal            
+                atom_signal = zs_atom.getAtomInSignal(len(noisy_signal), atom['x'])
+                true_signal += atom_signal
 
-            # Get the MMP approximation
-            mmp_tree_dict = result['mmp-tree']
-            mmp_approx_dict, mmp_approx_mse = self.getArgminMSEFromMMPTree(mmp_tree_dict)
-            mmp_approx_atoms = mmp_approx_dict['atoms']
+            # Get the signal approximation
+            true_sparsity_dict = result['results'][signal_sparsity-1]
+            approx_atoms = true_sparsity_dict['atoms']
 
-            # Get the OMP approximation
-            omp_path_str = '-'.join(['1']*result['sparsity'])
-            omp_approx_mse = mmp_tree_dict[omp_path_str]['mse']
-            omp_approx_atoms = mmp_tree_dict[omp_path_str]['atoms']
+            # Compute the orthgonal projection  on the dictionary if needed
+            if orthogonal_projection :
+                approx_signal, _ = self.dictionary.getSignalProjectionFromAtoms(true_signal, approx_atoms)
+            else :
+                approx_signal = np.zeros_like(true_signal)
+                for approx_atom in approx_atoms:
+                    zs_atom = ZSAtom.from_dict(approx_atom)
+                    zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                    atom_signal = zs_atom.getAtomInSignal(len(true_signal), approx_atom['x'])
+                    approx_signal += atom_signal
 
-            # Get the overlap vector of the signal
-            overlap_vector = self.getSignalOverlapVectorFromId(signal_id)
             overlap_intervals, overlap_intervals_values = self.getSignalOverlapIntervalsFromId(signal_id)
 
-            # Compute the reconstruction signals
-            # Create the signals
-            omp_signal = np.zeros_like(signal_dict['signal'])
-            mmp_signal = np.zeros_like(signal_dict['signal'])
-
-            for i, (omp_atom, mmp_atom) in enumerate(zip(omp_approx_atoms, mmp_approx_atoms)) :
-                # Construct the atoms from parameters
-                omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
-                omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
-                mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                # Get the atom signals
-                omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
-                omp_signal += omp_atom_signal
-                mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
-                mmp_signal += mmp_atom_signal
-
-            # Compute the local reconstruction error for each overlap interval
+            # Compute the reconstruction error for each overlap interval
             for (start, end), overlap in zip(overlap_intervals, overlap_intervals_values):
                 # Compute the mse on the interval
-                omp_mse_on_interval = np.mean((true_signal[start:end] - omp_signal[start:end])**2)
-                mmp_mse_on_interval = np.mean((true_signal[start:end] - mmp_signal[start:end])**2)
+                mse_on_interval = np.mean((true_signal[start:end] - approx_signal[start:end])**2)
 
-                # Append the OMP data 
+                # Append the data
                 data_overlap_intervals['id'].append(signal_id)
                 data_overlap_intervals['snr'].append(signal_dict['snr'])
                 data_overlap_intervals['overlap'].append(overlap)
-                data_overlap_intervals['local_mse'].append(omp_mse_on_interval)
-                data_overlap_intervals['algo_type'].append('OMP')
+                data_overlap_intervals['local_mse'].append(mse_on_interval)
 
-                # Append the MMP data
-                data_overlap_intervals['id'].append(signal_id)
-                data_overlap_intervals['snr'].append(signal_dict['snr'])
-                data_overlap_intervals['overlap'].append(overlap)
-                data_overlap_intervals['local_mse'].append(mmp_mse_on_interval)
-                data_overlap_intervals['algo_type'].append('MMP-DF')
-            
         return data_overlap_intervals
 
-    def plotMMPDFLocalMSEOverlapBoxplot(self, mmpdf_db_path:str, snr:int=-5) :
+    def computeMSEOverlapBoxplot(self, **kwargs) :
         """
-        Plot the boxplot of the position errors
+        Compute the dataframe boxplot of the MSE per overlap interval.
         Args:
             mmpdf_db_path (str): Path to the MMPDF database.
         """
         plt.figure(figsize=(12, 8)) 
-        data_overlap_intervals = self.computeMMPDFLocalMSEPerOverlapInterval(mmpdf_db_path)
-        df_all_snr = pd.DataFrame(data_overlap_intervals)
-        df = df_all_snr.loc[df_all_snr['snr'] == snr]
-        sns.boxplot(x='overlap', y='local_mse', hue='algo_type', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
-        sns.despine(trim=True)
-        plt.title('OMP vs MMPDF local MSE Comparison by local overlap level', fontsize=14)
-        plt.xlabel('Overlap >=', fontsize=12)
-        plt.ylabel('Local MSE', fontsize=12)
-        plt.xticks(fontsize=10)
-        plt.yticks(fontsize=10)
-        plt.legend(title='Algorithm', loc='best')
-        plt.show()
 
-    def computeMSEPerOverlapInterval_MMPDF(self, mmpdf_sparVar_db_path:str) -> Dict:
-        pass
-
-    def computeMSEPerOverlapInterval_OMP(self, db_path:str) -> Dict:
-        pass
-
-    def computeMSEPerOverlapInterval_MP(self, db_path:str) -> Dict:
-        pass
-
-    def plotMSEOverlapBoxplot(self, snr:int=-5, **kwargs) :
-        """
-        Plot the boxplot of the position errors
-        Args:
-            mmpdf_db_path (str): Path to the MMPDF database.
-        """
-        plt.figure(figsize=(12, 8)) 
+        snr_criteria = -1
+        verbose = False
 
         # Compute the local MSE per overlap interval for each algorithm
-        algo_intervals = dict()
+        overlap_intervals_df = dict()
         for key, value in kwargs.items():
-            if 'MMP' in key.lower() :
-                algo_intervals[key] = self.computeMSEPerOverlapInterval_MMPDF(value)
-            elif 'OMP' in key.lower() :
-                algo_intervals[key] = self.computeMSEPerOverlapInterval_OMP(value)
-            elif 'MP' in key.lower() :
-                algo_intervals[key] = self.computeMSEPerOverlapInterval_MP(value)
+            if verbose :
+                print(f' ~> Processing {key} with {value}')
+            if 'mmp' in key.lower() :
+                overlap_intervals_df[str(key.lower())] = self.computeMSEPerOverlapInterval(sparVar_db_path=value, results_key='mmp', orthogonal_projection=True, verbose=verbose)
+            elif 'omp' in key.lower() :
+                overlap_intervals_df[str(key.lower())] = self.computeMSEPerOverlapInterval(sparVar_db_path=value, results_key='omp', orthogonal_projection=True, verbose=verbose)
+            elif 'mp' in key.lower() :
+                overlap_intervals_df[str(key.lower())] = self.computeMSEPerOverlapInterval(sparVar_db_path=value, results_key='mp', orthogonal_projection=False, verbose=verbose)
+            elif key == 'snr_criteria' :
+                snr_criteria = value
+            elif key == 'verbose' :
+                verbose = value
             else :
                 raise ValueError(f'Unknown algorithm type : {key}')
 
-        # Plot the boxplot for each algorithm
-        for algorithm, dict_intervals in algo_intervals.items():
-            df_all_snr = pd.DataFrame(dict_intervals)
-            df = df_all_snr.loc[df_all_snr['snr'] == snr]
-            sns.boxplot(x='overlap', y='local_mse', hue='algo_type', data=df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
-            
+        if verbose : 
+            print(f'Overlap intervals dataframes :\n{overlap_intervals_df}')
+
+        concatenated_df = pd.concat([pd.DataFrame(data) for data in overlap_intervals_df.values()], keys=['conv-' + str(key).upper() for key in overlap_intervals_df.keys()])
+        concatenated_df = concatenated_df.reset_index(level=0).rename(columns={'level_0': 'algo_type'})
+        if snr_criteria != -1 :
+            concatenated_df = concatenated_df.loc[concatenated_df['snr'] == snr_criteria]
+        
+        return concatenated_df
+    
+    def plotMSEOverlapBoxplot(self, **kwargs) :
+        """
+        Plot the boxplot of the MSE per overlap interval.
+        """
+        concatenated_df = self.computeMSEOverlapBoxplot(**kwargs)
+        verbose = kwargs.get('verbose', False)
+        if verbose :
+            print(concatenated_df)
+        sns.boxplot(x='overlap', y='local_mse', hue='algo_type', data=concatenated_df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
         sns.despine(trim=True)
-        plt.title('OMP vs MMPDF local MSE Comparison by local overlap level', fontsize=14)
+        plt.title('Local MSE by overlap level per interval', fontsize=14)
         plt.xlabel('Overlap >=', fontsize=12)
         plt.ylabel('Local MSE', fontsize=12)
         plt.xticks(fontsize=10)
