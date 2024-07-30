@@ -29,6 +29,7 @@ from matplotlib.cm import ScalarMappable
 
 from critdd import Diagram
 
+import statsmodels.api as sm
 
 class CSCWorkbench:
 
@@ -1459,266 +1460,270 @@ class CSCWorkbench:
         plt.legend(title='Algorithm', loc='best')
         plt.show()
 
-    def computeMMPDFLocalMSEPOverlapPrct(self, db_path:str) -> Dict:
+    #       __  ________ ______                 ____________  _________
+    #      /  |/  / ___// ____/  _   _______   /_  __/  _/  |/  / ____/
+    #     / /|_/ /\__ \/ __/    | | / / ___/    / /  / // /|_/ / __/   
+    #    / /  / /___/ / /___    | |/ (__  )    / / _/ // /  / / /___   
+    #   /_/  /_//____/_____/    |___/____/    /_/ /___/_/  /_/_____/   
+                                                               
+    def computeTimeMSEDataframe(self, sparVar_db_path:str, results_key:str, verbose:bool=False) -> Dict:
         """
-        Compute the MSE and the overlap percentage for each signal.
+        Compute the time for the MSE persignal.
         Each row corresponds to a signal.
+        Args :
+            sparVar_db_path (str) : Path to the sparse variables database.
+            results_key (str) : Key of the results in the database.
+            verbose (bool) : If True, print the progress.
         """
         # Load the data
-        with open(db_path, 'r') as f:
+        with open(sparVar_db_path, 'r') as f:
             output_data = json.load(f)
 
-        data_prct_overlap_type = {
+        data_delay_vs_mse = {
             'id': [],
             'snr': [],
-            'overlap_type': [],
-            'prct_in_signal': [],
-            'algo_type': [],
-            'mse': []
+            'mse': [],
+            'delay': []
         }
         # Iterate over the outputs
-        for result in output_data['mmp'] :
-
-            # Reconstruct the denoised signal
-            signal_id = result['id']
-            signal_dict = self.signalDictFromId(signal_id)
-            signal_atoms = signal_dict['atoms']
-            true_signal = np.zeros_like(signal_dict['signal'])
-            for atom in signal_atoms:
-                zs_atom = ZSAtom.from_dict(atom)
-                zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
-                true_signal += atom_signal    
-
-            # Get the MMP approximation
-            mmp_tree_dict = result['mmp-tree']
-            mmp_approx_dict, mmp_approx_mse = self.getArgminMSEFromMMPTree(mmp_tree_dict)
-            mmp_approx_atoms = mmp_approx_dict['atoms']
-
-            # Get the OMP approximation
-            omp_path_str = '-'.join(['1']*result['sparsity'])
-            omp_approx_mse = mmp_tree_dict[omp_path_str]['mse']
-            omp_approx_atoms = mmp_tree_dict[omp_path_str]['atoms']
-
-            # Compute the reconstruction signals
-            # Create the signals
-            omp_signal = np.zeros_like(signal_dict['signal'])
-            mmp_signal = np.zeros_like(signal_dict['signal'])
-
-            for i, (omp_atom, mmp_atom) in enumerate(zip(omp_approx_atoms, mmp_approx_atoms)) :
-                # Construct the atoms from parameters
-                omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
-                omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
-                mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                # Get the atom signals
-                omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
-                omp_signal += omp_atom_signal
-                mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
-                mmp_signal += mmp_atom_signal
-
-            # Compute the reconstruction error
-            omp_mse = np.mean((true_signal - omp_signal)**2)
-            mmp_mse = np.mean((true_signal - mmp_signal)**2)
-
-            # Get the prct of overlap type in the signal
-            prct_overlap_type = self.signalOverlapTypePrctFromId(id=signal_id, nb_round=3)
-
-            # Compute the local reconstruction error for each overlap interval
-            for overlap_type, prct in prct_overlap_type.items():
-
-                # Append the OMP data 
-                data_prct_overlap_type['id'].append(signal_id)
-                data_prct_overlap_type['snr'].append(signal_dict['snr'])
-                data_prct_overlap_type['overlap_type'].append(overlap_type)
-                data_prct_overlap_type['prct_in_signal'].append(prct)
-                data_prct_overlap_type['algo_type'].append('OMP')
-                data_prct_overlap_type['mse'].append(omp_mse)
-
-                # Append the MMP data
-                data_prct_overlap_type['id'].append(signal_id)
-                data_prct_overlap_type['snr'].append(signal_dict['snr'])
-                data_prct_overlap_type['overlap_type'].append(overlap_type)
-                data_prct_overlap_type['prct_in_signal'].append(prct)
-                data_prct_overlap_type['algo_type'].append('MMP-DF')
-                data_prct_overlap_type['mse'].append(omp_mse)
+        for result in tqdm(output_data[results_key], desc=f"Processing {results_key.upper()}"):
             
-        return data_prct_overlap_type
-
-    def plotMMPDFLocalMSEOverlapPrctLineplot(self, mmpdf_db_path:str) :
-        """
-        Plot the lineplot of the MSE by overlap percentage 
-        """
-        plt.figure(figsize=(12, 8))
-
-        overlap_prct_metrics = self.computeMMPDFLocalMSEPOverlapPrct(mmpdf_db_path)
-        metrics_df = pd.DataFrame(overlap_prct_metrics)
-
-        # Define colors and markers for the plots
-        colors = {'OMP': 'navy', 'MMP-DF': 'red'}
-        markers = {'>=1': 'o', '>=2': 'D', '>=3': 'X', '>=4': 's', '>=5': 'P'}
-
-        # Group data and plot
-        grouped = metrics_df.groupby(['algo_type', 'overlap_type'])
-        for (algo_type, overlap_type), group in grouped:
-            sns.lineplot(x='prct_in_signal', y='mse', data=group,
-                        label=f'{algo_type} overlap {overlap_type}',
-                        color=colors[algo_type],
-                        marker=markers[overlap_type],
-                        markersize=8)
-
-        plt.title(f'OMP and MMP-DF MSE per number of minimum overlapped atom on the same interval', fontsize=16)
-        plt.xlabel('Minimum number of overlapped atoms on the same interval', fontsize=14)
-        plt.ylabel('MSE', fontsize=14)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=12)
-        plt.legend(title='Algorithm & Sparsity', loc='upper left', fontsize=12)
-        plt.grid(True)
-        plt.gca().xaxis.set_major_locator(ticker.MultipleLocator(5))
-        plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(0.1))
-        plt.show()
-
-    def plotMMPDFLocalMSEOverlapPrctLineplot2(self, mmpdf_db_path):
-        """
-        Plot the lineplot of the MSE by overlap percentage for OMP and MMP-DF algorithms.
-        """
-        # Suppose the following function returns the DataFrame as expected
-        overlap_prct_metrics = self.computeMMPDFLocalMSEPOverlapPrct(mmpdf_db_path)
-        metrics_df = pd.DataFrame(overlap_prct_metrics)
-
-        plt.figure(figsize=(12, 8))
-        markers = {'>=1': 'o', '>=2': 'D', '>=3': 'X', '>=4': 's', '>=5': 'P'}
-
-        # Utilizing sns.scatterplot to plot data points with clear distinctions
-        sns.scatterplot(data=metrics_df, x='prct_in_signal', y='mse', hue='algo_type',
-                        style='overlap_type', markers=markers, palette=['navy', 'red'], s=100)
-
-        plt.title('OMP and MMP-DF MSE per Overlap Type Percentage in the Signal', fontsize=16)
-        plt.xlabel('Percentage of Overlap Type in Signal (%)', fontsize=14)
-        plt.ylabel('MSE', fontsize=14)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=12)
-        plt.legend(title='Algorithm & Overlap Type', loc='upper left', fontsize=12)
-        plt.grid(True)
-        plt.show()
-
-    def plotMMPRankDistribution(self, db_path:str):
-        """
-        Plot the rank distribution of the MMP that has a better MSE score than OMP.
-        The plot is sorted by sparsity level.
-        """
-        # Load the data
-        with open(db_path, 'r') as f:
-            data = json.load(f)
-
-        # Filter the data to keep only the MMP results with better MSE than OMP
-        mmp_results = [mmp_path for result in data['mmp'] for mmp_path, mmp_dict in result['mmp-tree'].items() if mmp_dict['mse'] < mmp_dict['-'.join([1 for _ in range(result['sparsity'])])]['mse']]
-        
-        
-        # Sort the results by sparsity level
-        sorted_results = sorted(mmp_results, key=lambda x: x['sparsity'])
-
-        # Extract the ranks of the MMPs
-        ranks = [result['rank'] for result in sorted_results]
-
-        # Plot the rank distribution
-        plt.figure(figsize=(12, 8))
-        sns.histplot(ranks, bins=len(ranks), kde=True, color='blue')
-        plt.title('Rank Distribution of MMPs with Better MSE than OMP', fontsize=16)
-        plt.xlabel('Rank', fontsize=14)
-        plt.ylabel('Count', fontsize=14)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=12)
-        plt.grid(True)
-        plt.show()
-
-    def computeMMPRankDistribution(self, db_path:str) -> Dict:
-        """
-        Compute the MSE and the overlap percentage for each signal.
-        Each row corresponds to a signal.
-        """
-        # Load the data
-        with open(db_path, 'r') as f:
-            output_data = json.load(f)
-
-        data_prct_overlap_type = {
-            'id': [],
-            'snr': [],
-            'overlap_type': [],
-            'prct_in_signal': [],
-            'algo_type': [],
-            'mse': []
-        }
-        # Iterate over the outputs
-        for result in output_data['mmp'] :
-
-            # Reconstruct the denoised signal
+            # Get the signal dictionary
             signal_id = result['id']
+            signal_snr = result['snr']
             signal_dict = self.signalDictFromId(signal_id)
-            signal_atoms = signal_dict['atoms']
-            true_signal = np.zeros_like(signal_dict['signal'])
-            for atom in signal_atoms:
-                zs_atom = ZSAtom.from_dict(atom)
-                zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
-                true_signal += atom_signal    
-
-            # Get the MMP approximation
-            mmp_tree_dict = result['mmp-tree']
-            mmp_approx_dict, mmp_approx_mse = self.getArgminMSEFromMMPTree(mmp_tree_dict)
-            mmp_approx_atoms = mmp_approx_dict['atoms']
-
-            # Get the OMP approximation
-            omp_path_str = '-'.join(['1']*result['sparsity'])
-            omp_approx_mse = mmp_tree_dict[omp_path_str]['mse']
-            omp_approx_atoms = mmp_tree_dict[omp_path_str]['atoms']
-
-            # Compute the reconstruction signals
-            # Create the signals
-            omp_signal = np.zeros_like(signal_dict['signal'])
-            mmp_signal = np.zeros_like(signal_dict['signal'])
-
-            for i, (omp_atom, mmp_atom) in enumerate(zip(omp_approx_atoms, mmp_approx_atoms)) :
-                # Construct the atoms from parameters
-                omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
-                omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
-                mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
-                # Get the atom signals
-                omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
-                omp_signal += omp_atom_signal
-                mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
-                mmp_signal += mmp_atom_signal
-
-            # Compute the reconstruction error
-            omp_mse = np.mean((true_signal - omp_signal)**2)
-            mmp_mse = np.mean((true_signal - mmp_signal)**2)
-
-            # Get the prct of overlap type in the signal
-            prct_overlap_type = self.signalOverlapTypePrctFromId(id=signal_id, nb_round=3)
-
-            # Compute the local reconstruction error for each overlap interval
-            for overlap_type, prct in prct_overlap_type.items():
-
-                # Append the OMP data 
-                data_prct_overlap_type['id'].append(signal_id)
-                data_prct_overlap_type['snr'].append(signal_dict['snr'])
-                data_prct_overlap_type['overlap_type'].append(overlap_type)
-                data_prct_overlap_type['prct_in_signal'].append(prct)
-                data_prct_overlap_type['algo_type'].append('OMP')
-                data_prct_overlap_type['mse'].append(omp_mse)
-
-                # Append the MMP data
-                data_prct_overlap_type['id'].append(signal_id)
-                data_prct_overlap_type['snr'].append(signal_dict['snr'])
-                data_prct_overlap_type['overlap_type'].append(overlap_type)
-                data_prct_overlap_type['prct_in_signal'].append(prct)
-                data_prct_overlap_type['algo_type'].append('MMP-DF')
-                data_prct_overlap_type['mse'].append(omp_mse)
+            signal_sparsity= len(signal_dict['atoms'])
             
-        return data_prct_overlap_type
+            # Get the result dict for the signal sparsity
+            result_dict = result['results'][signal_sparsity-1]
+
+            # Append the data
+            data_delay_vs_mse['id'].append(signal_id)
+            data_delay_vs_mse['snr'].append(signal_snr)
+            data_delay_vs_mse['mse'].append(result_dict['mse'])
+            data_delay_vs_mse['delay'].append(result_dict['delay'])
+            
+        return data_delay_vs_mse
     
-                                                                                          
+    def computeTimeMSEComparison(self, **kwargs) :
+        """
+        Compute the dataframe of the comparison between computing time and MSE.
+        Args:
+            mmpdf_db_path (str): Path to the MMPDF database.
+        """
+        plt.figure(figsize=(12, 8)) 
+
+        snr_criteria = -1
+        verbose = False
+
+        # Compute the local MSE per overlap interval for each algorithm
+        delay_vs_mse_df = dict()
+        for key, value in kwargs.items():
+            if verbose :
+                print(f' ~> Processing {key} with {value}')
+            if 'mmp' in key.lower() :
+                delay_vs_mse_df[str(key.lower())] = self.computeTimeMSEDataframe(sparVar_db_path=value, results_key='mmp', verbose=verbose)
+            elif 'omp' in key.lower() :
+                delay_vs_mse_df[str(key.lower())] = self.computeTimeMSEDataframe(sparVar_db_path=value, results_key='omp', verbose=verbose)
+            elif 'mp' in key.lower() :
+                delay_vs_mse_df[str(key.lower())] = self.computeTimeMSEDataframe(sparVar_db_path=value, results_key='mp', verbose=verbose)
+            elif key == 'snr_criteria' :
+                snr_criteria = value
+            elif key == 'verbose' :
+                verbose = value
+            else :
+                raise ValueError(f'Unknown algorithm type : {key}')
+            
+        concatenated_df = pd.concat([pd.DataFrame(data) for data in delay_vs_mse_df.values()], keys=['conv-' + str(key).upper() for key in delay_vs_mse_df.keys()])
+        concatenated_df = concatenated_df.reset_index(level=0).rename(columns={'level_0': 'algo_type'})
+        if snr_criteria != -1 :
+            concatenated_df = concatenated_df.loc[concatenated_df['snr'] == snr_criteria]
+        
+        return concatenated_df
+
+    def plotDelayVsMSE(self, **kwargs) :
+        """
+        Plot the boxplot of the computing delay vs the MSE.
+        """
+        concatenated_df = self.computeTimeMSEComparison(**kwargs)
+        
+        verbose = kwargs.get('verbose', False)
+        if verbose:
+            print(concatenated_df)
+
+        plt.figure(figsize=(12, 8))
+        
+        # Create hexbin plots for each algorithm
+        unique_algos = concatenated_df['algo_type'].unique()
+        colors = sns.color_palette("hsv", len(unique_algos))
+
+        for algo, color in zip(unique_algos, colors):
+            subset = concatenated_df[concatenated_df['algo_type'] == algo]
+            plt.hexbin(subset['delay'], subset['mse'], gridsize=30, cmap=sns.light_palette(color, as_cmap=True), mincnt=1, label=algo, alpha=0.7)
+        
+        sns.despine(trim=True)
+        plt.title('Local MSE by overlap level per interval', fontsize=14)
+        plt.xlabel('Computing time', fontsize=12)
+        plt.ylabel('MSE', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.legend(title='Algorithm', loc='best')
+        plt.show()
+
+    def plotDelayVsMSE(self, **kwargs) -> None:
+        """
+        Plot the boxplot of the computing delay vs the MSE.
+        """
+        concatenated_df = self.computeTimeMSEComparison(**kwargs)
+        verbose = kwargs.get('verbose', False)
+        if verbose:
+            print(concatenated_df)
+
+        plt.figure(figsize=(12, 8))
+        
+        # Create a hexbin plot for each algorithm
+        unique_algos = concatenated_df['algo_type'].unique()
+        colors = sns.color_palette("hsv", len(unique_algos))
+        
+        for algo, color in zip(unique_algos, colors):
+            subset = concatenated_df[concatenated_df['algo_type'] == algo]
+            if verbose:
+                print(f"Processing {algo}, number of rows: {len(subset)}")
+                print(subset.head())
+            
+            plt.hexbin(subset['delay'], subset['mse'], gridsize=30, cmap=sns.light_palette(color, as_cmap=True), mincnt=1, label=algo, alpha=0.7)
+
+        # Custom legend
+        handles = [plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color, markersize=10, label=algo) for algo, color in zip(unique_algos, colors)]
+        plt.legend(handles=handles, title='Algorithm', loc='best')
+        
+        sns.despine(trim=True)
+        plt.title('MSE vs Delay for Different Algorithms', fontsize=14)
+        plt.xlabel('Delay', fontsize=12)
+        plt.ylabel('MSE', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.colorbar(label='Count')
+        plt.show()
+
+    def plotDelayVsMSERatioOMP(self, **kwargs) -> None:
+        concatenated_df = self.computeTimeMSEComparison(**kwargs)
+        verbose = kwargs.get('verbose', False)
+        if verbose:
+            print(concatenated_df)
+
+        # Filter for OMP and MMP algorithms
+        omp_df = concatenated_df[concatenated_df['algo_type'].str.contains('OMP')]
+        mmp_dfs = {algo: concatenated_df[concatenated_df['algo_type'] == algo] for algo in concatenated_df['algo_type'].unique() if 'MMP' in algo}
+
+        plt.figure(figsize=(12, 8))
+
+        # Plotting and calculating the ratios
+        for algo, mmp_df in mmp_dfs.items():
+            # Ensure there are matching signal ids in both datasets
+            common_ids = np.intersect1d(omp_df['id'], mmp_df['id'])
+            omp_common = omp_df[omp_df['id'].isin(common_ids)]
+            mmp_common = mmp_df[mmp_df['id'].isin(common_ids)]
+            
+            # Calculate the MSE ratio
+            # mse_ratio = omp_common['mse'].values / mmp_common['mse'].values
+            mse_ratio = mmp_common['mse'].values / omp_common['mse'].values
+            
+            # Plot the scatter plot of MMP delay vs MSE ratio
+            plt.scatter(mmp_common['delay'], mse_ratio, label=f'OMP / {algo}', alpha=0.1)
+            
+            # Linear approximation
+            X = mmp_common['delay'].values
+            Y = mse_ratio
+            X = sm.add_constant(X)  # Adds a constant term to the predictor
+            model = sm.OLS(Y, X).fit()
+            predictions = model.predict(X)
+            
+            # Plot the linear regression line
+            plt.plot(mmp_common['delay'], predictions, label=f'Linear fit OMP / {algo}', lw=2)
+
+        sns.despine(trim=True)
+        plt.title('MSE Ratio (MMP/OMP) vs Delay for Different Algorithms', fontsize=14)
+        plt.xlabel('MMP Delay', fontsize=12)
+        plt.ylabel('MSE Ratio (OMP / MMP)', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.legend(title='Algorithm', loc='best')
+        plt.show()
+
+    def boxplotDelayVsMSERatioMMP(self, **kwargs) :
+        """
+        Boxplot the computing time to reach a given MSE level.
+        """
+        concatenated_df = self.computeTimeMSEComparison(**kwargs)
+        verbose = kwargs.get('verbose', False)
+        if verbose:
+            print(concatenated_df)
+
+        plt.figure(figsize=(12, 8))
+
+        # Overlay a scatter plot to show the actual points
+        sns.stripplot(x='delay',
+                      y='algo_type',
+                      data=concatenated_df,
+                      size=4,
+                      color=".3",
+                      linewidth=0,
+                      alpha=0.2
+                      )
+
+        # Overlay a boxplot with horizontal orientation
+        sns.boxplot(x='delay',
+                    y='algo_type',
+                    data=concatenated_df,
+                    whis=1.5,
+                    width=0.7,
+                    palette="vlag", 
+                    showfliers=False
+                    )
+        
+        # Customize the plot
+        sns.despine(trim=True)
+        plt.title('Computing Time vs MSE for Different Algorithms', fontsize=14)
+        plt.xlabel('Computing Time (seconds)', fontsize=12)
+        plt.ylabel('Algorithm', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.show()
+
+    def refinedBoxplotDelayVsMSE(self, **kwargs) -> None:
+        concatenated_df = self.computeTimeMSEComparison(**kwargs)
+        verbose = kwargs.get('verbose', False)
+        if verbose:
+            print(concatenated_df)
+
+        # Compute median and IQR for MSE for each algorithm
+        median_mse_df = concatenated_df.groupby('algo_type')['mse'].agg(median='median', q1=lambda x: x.quantile(0.25), q3=lambda x: x.quantile(0.75)).reset_index()
+        median_mse_df['iqr'] = median_mse_df['q3'] - median_mse_df['q1']
+        
+        # Merge the median MSE data back with the original dataframe
+        merged_df = concatenated_df.merge(median_mse_df, on='algo_type')
+        
+        plt.figure(figsize=(12, 8))
+
+        # Create a boxplot with horizontal orientation
+        sns.boxplot(x='delay', y='median', data=merged_df, whis=1.5, width=0.7, palette="vlag", hue='algo_type', showfliers=False, legend=False)
+
+        # Overlay a scatter plot to show the actual points
+        sns.stripplot(x='delay', y='median', data=merged_df, size=4, color=".3", linewidth=0)
+
+        # Customize the plot
+        sns.despine(trim=True)
+        plt.title('Computing Time vs Median MSE for Different Algorithms', fontsize=14)
+        plt.xlabel('Computing Time (seconds)', fontsize=12)
+        plt.ylabel('Median MSE', fontsize=12)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.show()
+
+                                                                                              
 # 8 8888     ,o888888o.           .8.            d888888o.      d888888o.   8 888888888o   
 # 8 8888    8888     `88.        .888.         .`8888:' `88.  .`8888:' `88. 8 8888    `88. 
 # 8 8888 ,8 8888       `8.      :88888.        8.`8888.   Y8  8.`8888.   Y8 8 8888     `88 
