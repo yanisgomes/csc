@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 23.5) (preloaded format=pdflatex 2023.7.27)  28 JUL 2024 20:57
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (MiKTeX 23.5) (preloaded format=pdflatex 2023.7.27)  30 JUL 2024 11:10
 entering extended mode
  \write18 enabled.
  file:line:error style messages enabled.
@@ -379,24 +379,24 @@ File: epstopdf-sys.cfg 2021/03/18 v2.0 Configuration of epstopdf for MiKTeX
 ))
 Package pgfplots notification 'compat/show suggested version=true': document has been generated with the most recent feature set (\pgfplotsset{compat=1.18}).
 
-LaTeX Font Info:    Trying to load font information for OML+lmm on input line 48.
+LaTeX Font Info:    Trying to load font information for OML+lmm on input line 45.
 (C:\Users\gomes\AppData\Local\Programs\MiKTeX\tex/latex/lm\omllmm.fd
 File: omllmm.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
-LaTeX Font Info:    Trying to load font information for OMS+lmsy on input line 48.
+LaTeX Font Info:    Trying to load font information for OMS+lmsy on input line 45.
  (C:\Users\gomes\AppData\Local\Programs\MiKTeX\tex/latex/lm\omslmsy.fd
 File: omslmsy.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
-LaTeX Font Info:    Trying to load font information for OMX+lmex on input line 48.
+LaTeX Font Info:    Trying to load font information for OMX+lmex on input line 45.
  (C:\Users\gomes\AppData\Local\Programs\MiKTeX\tex/latex/lm\omxlmex.fd
 File: omxlmex.fd 2015/05/01 v1.6.1 Font defs for Latin Modern
 )
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <9> on input line 48.
+(Font)              <9> on input line 45.
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <6> on input line 48.
+(Font)              <6> on input line 45.
 LaTeX Font Info:    External font `lmex10' loaded for size
-(Font)              <5> on input line 48.
+(Font)              <5> on input line 45.
  [1
 
 {C:/Users/gomes/AppData/Local/MiKTeX/fonts/map/pdftex/pdftex.map}{C:/Users/gomes/AppData/Local/Programs/MiKTeX/fonts/enc/dvips/lm/lm-rm.enc}] (CDD_test.aux)
@@ -406,15 +406,15 @@ L3 programming layer <2023-06-30>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 22694 strings out of 475551
- 611784 string characters out of 5762554
- 1925238 words of memory out of 5000000
- 43559 multiletter control sequences out of 15000+600000
+ 22691 strings out of 475551
+ 611739 string characters out of 5762554
+ 1923238 words of memory out of 5000000
+ 43556 multiletter control sequences out of 15000+600000
  572014 words of font info for 47 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  117i,10n,121p,832b,1933s stack positions out of 10000i,1000n,20000p,200000b,200000s
 <C:/Users/gomes/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmr10.pfb><C:/Users/gomes/AppData/Local/Programs/MiKTeX/fonts/type1/public/lm/lmr9.pfb>
-Output written on CDD_test.pdf (1 page, 55465 bytes).
+Output written on CDD_test.pdf (1 page, 54084 bytes).
 PDF statistics:
  20 PDF objects out of 1000 (max. 8388607)
  0 named destinations out of 1000 (max. 500000)

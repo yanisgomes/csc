@@ -1044,7 +1044,7 @@ class ZSDictionary() :
         }
         return mmp_result
     
-    def mmpdfSparVarFromDict(self, signal_dict:dict, connections_level:int, dissimilarity:float, nb_branches:int, max_sparsity:int, verbose:bool=False) -> dict :
+    def mmpdfSparVarFromDict(self, signal_dict:dict, connections_level:int, dissimilarity:float, nb_branches:int, max_sparsity:int, compute_time_type:str='local', verbose:bool=False) -> dict :
         """Recover the sparse signal from a dictionary of the signal 
            returns a list of the result for each candidate_sparsity level <= max_sparsity
         Args:
@@ -1060,7 +1060,7 @@ class ZSDictionary() :
             # Run the MMPDF algorithm
             mmp_tree = MMPTree(dictionary=self, signal=signal, sparsity=candidate_sparsity, connections=connections_level, dissimilarity=dissimilarity)
             mmp_tree.runMMPDF(branches_number=nb_branches, verbose=verbose)
-            mmp_result = mmp_tree.buildMMPDFResultDict()
+            mmp_result = mmp_tree.buildMMPDFResultDict(compute_time_type=compute_time_type)
             mmpdf_sparVar_list.append(mmp_result)
 
         mmpdf_sparVar_results = {
@@ -1110,7 +1110,7 @@ class ZSDictionary() :
         if verbose :
             print(f"MMP-DF Pipeline results saved in {output_filename}")
 
-    def mmpdfSparVarPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, connections:int=3, dissimilarity:float=0.8, branches:int=10, max_sparsity:int=10, verbose=False) :
+    def mmpdfSparVarPipelineFromDB(self, input_filename:str, output_filename:str, nb_cores:int, connections:int=3, dissimilarity:float=0.8, branches:int=10, max_sparsity:int=10, compute_time_type:str='local', verbose=False) :
         """Create a pipeline of the MMP-DF algorithm from the database of signals.
         Args:
             input_filename (str): The name of the input file containing the signals database
@@ -1144,7 +1144,7 @@ class ZSDictionary() :
         results['dictionary'] = str(self)
 
         # Parallelize the OMP algorithm on the signals from the DB
-        mmpdf_results = Parallel(n_jobs=nb_cores)(delayed(self.mmpdfSparVarFromDict)(signal_dict, connections_level=connections, dissimilarity=dissimilarity, nb_branches=branches, max_sparsity=max_sparsity, verbose=verbose) for signal_dict in tqdm(signals, desc='MMP-DF SparVar Pipeline from DB'))
+        mmpdf_results = Parallel(n_jobs=nb_cores)(delayed(self.mmpdfSparVarFromDict)(signal_dict, connections_level=connections, dissimilarity=dissimilarity, nb_branches=branches, max_sparsity=max_sparsity, compute_time_type=compute_time_type, verbose=verbose) for signal_dict in tqdm(signals, desc='MMP-DF SparVar Pipeline from DB'))
         results['mmp'] = mmpdf_results
         # Save the results in a JSON file
         json.dump(results, open(output_filename, 'w'), indent=4, default=handle_non_serializable)

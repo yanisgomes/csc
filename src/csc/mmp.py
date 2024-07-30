@@ -514,7 +514,7 @@ class MMPTree() :
             mmp_tree_dict[str_path]['delay'] = leaf.getMMPDFComputeTime()
         return mmp_tree_dict
 
-    def buildMMPDFResultDict(self) -> Tuple[str, dict]:
+    def buildMMPDFResultDict(self, compute_time_type:str='local') -> Tuple[str, dict]:
         """
         Build the result item of the MMPTree :
         {'mse': min_mse, 'path': argmin_mse_path_str, 'atoms': argmin_mse_atoms, 'delay': mmpdf_compute_time}
@@ -531,11 +531,16 @@ class MMPTree() :
         argmin_mse_path = self.leaves_paths[argmin_mse_idx]
         argmin_mse_path_str = '-'.join([str(p) for p in argmin_mse_path])
 
+        if compute_time_type == 'local' :
+            leaf_compute_time = argmin_leaf.getMMPDFComputeTime()
+        elif compute_time_type == 'global' :
+            leaf_compute_time = self.leaves_nodes[-1].getMMPDFComputeTime()
+
         mmpdf_result = {
             'mse' : argmin_leaf.getMSE(),
             'path' : argmin_mse_path_str,
             'atoms' : argmin_leaf.getFullBranchAtoms(),
-            'delay' : argmin_leaf.getMMPDFComputeTime()
+            'delay' : leaf_compute_time
         }
 
         return mmpdf_result

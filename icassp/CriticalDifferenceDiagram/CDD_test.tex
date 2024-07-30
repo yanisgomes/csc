@@ -23,27 +23,24 @@
   major tick style={yshift=.5*\pgfkeysvalueof{/pgfplots/major tick length}},
   minor tick style={yshift=.5*\pgfkeysvalueof{/pgfplots/minor tick length}},
   title style={yshift=\baselineskip},
-  xmax={6},
-  ymin={-4.5},
-  height={5\baselineskip},
-  xtick={1,2,3,4,5,6},
+  xmax={4},
+  ymin={-3.5},
+  height={4\baselineskip},
+  xtick={1,2,3,4},
   minor x tick num={3},
   x dir={reverse},
   title={CSC algorithms critical difference diagram},
 ]
 
-\draw[treatment line] ([yshift=-2pt] axis cs:2.729375, 0) |- (axis cs:2.229375, -2.0)
+\draw[treatment line] ([yshift=-2pt] axis cs:2.468125, 0) |- (axis cs:2.1347916666666666, -2.0)
   node[treatment label, anchor=west] {conv-MMP27};
-\draw[treatment line] ([yshift=-2pt] axis cs:2.78578125, 0) |- (axis cs:2.229375, -3.0)
+\draw[treatment line] ([yshift=-2pt] axis cs:2.47734375, 0) |- (axis cs:2.1347916666666666, -3.0)
   node[treatment label, anchor=west] {conv-MMP10};
-\draw[treatment line] ([yshift=-2pt] axis cs:2.993125, 0) |- (axis cs:2.229375, -4.0)
-  node[treatment label, anchor=west] {conv-MMP3};
-\draw[treatment line] ([yshift=-2pt] axis cs:3.38953125, 0) |- (axis cs:5.77171875, -4.0)
+\draw[treatment line] ([yshift=-2pt] axis cs:2.504375, 0) |- (axis cs:2.8834895833333336, -3.0)
+  node[treatment label, anchor=east] {conv-MMP3};
+\draw[treatment line] ([yshift=-2pt] axis cs:2.55015625, 0) |- (axis cs:2.8834895833333336, -2.0)
   node[treatment label, anchor=east] {conv-OMP};
-\draw[treatment line] ([yshift=-2pt] axis cs:3.83046875, 0) |- (axis cs:5.77171875, -3.0)
-  node[treatment label, anchor=east] {conv-MP};
-\draw[treatment line] ([yshift=-2pt] axis cs:5.27171875, 0) |- (axis cs:5.77171875, -2.0)
-  node[treatment label, anchor=east] {CSC-L1};
+\draw[group line] (axis cs:2.468125, -1.3333333333333333) -- (axis cs:2.55015625, -1.3333333333333333);
 
 \end{axis}
 \end{tikzpicture}
