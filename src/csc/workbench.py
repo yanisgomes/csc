@@ -1470,177 +1470,38 @@ class CSCWorkbench:
     #     / /|_/ /\__ \/ __/    | | / / ___/    / /  / // /|_/ / __/   
     #    / /  / /___/ / /___    | |/ (__  )    / / _/ // /  / / /___   
     #   /_/  /_//____/_____/    |___/____/    /_/ /___/_/  /_/_____/   
-                                                               
-    #def computeTimeMSEDataframe(self, sparVar_db_path:str, results_key:str, sparsity:str, verbose:bool=False) -> Dict:
-    #    """
-    #    Compute the time for the MSE persignal.
-    #    Each row corresponds to a signal.
-    #    Args :
-    #        sparVar_db_path (str) : Path to the sparse variables database.
-    #        results_key (str) : Key of the results in the database.
-    #        verbose (bool) : If True, print the progress.
-    #    """
-    #    # Load the data
-    #    with open(sparVar_db_path, 'r') as f:
-    #        output_data = json.load(f)
-#
-    #    data_delay_vs_mse = {
-    #        'id': [],
-    #        'snr': [],
-    #        'mse': [],
-    #        'delay': []
-    #    }
-    #    # Iterate over the outputs
-    #    for result in tqdm(output_data[results_key], desc=f"Processing {results_key.upper()}"):
-    #        
-    #        # Get the signal dictionary
-    #        signal_id = result['id']
-    #        signal_snr = result['snr']
-    #        signal_dict = self.signalDictFromId(signal_id)
-    #        signal_sparsity= len(signal_dict['atoms'])
-#
-    #        if signal_sparsity == sparsity :
-    #            # Get the result dict for the signal sparsity
-    #            result_dict = result['results'][signal_sparsity-1]
-#
-    #            # Append the data
-    #            data_delay_vs_mse['id'].append(signal_id)
-    #            data_delay_vs_mse['snr'].append(signal_snr)
-    #            data_delay_vs_mse['mse'].append(result_dict['mse'])
-    #            data_delay_vs_mse['delay'].append(result_dict['delay'])
-    #        
-    #    return data_delay_vs_mse
-    #
-    #def computeTimeMSEComparison(self, sparsity:str, **kwargs) :
-    #    """
-    #    Compute the dataframe of the comparison between computing time and MSE.
-    #    Args:
-    #        mmpdf_db_path (str): Path to the MMPDF database.
-    #    """
-    #    plt.figure(figsize=(12, 8)) 
-#
-    #    snr_criteria = -1
-    #    verbose = False
-#
-    #    # Compute the local MSE per overlap interval for each algorithm
-    #    delay_vs_mse_df = dict()
-    #    for key, value in kwargs.items():
-    #        if verbose :
-    #            print(f' ~> Processing {key} with {value}')
-    #        if 'mmp' in key.lower() :
-    #            delay_vs_mse_df[str(key.lower())] = self.computeTimeMSEDataframe(sparVar_db_path=value, results_key='mmp', sparsity=sparsity, verbose=verbose)
-    #        elif 'omp' in key.lower() :
-    #            delay_vs_mse_df[str(key.lower())] = self.computeTimeMSEDataframe(sparVar_db_path=value, results_key='omp', sparsity=sparsity, verbose=verbose)
-    #        elif 'mp' in key.lower() :
-    #            delay_vs_mse_df[str(key.lower())] = self.computeTimeMSEDataframe(sparVar_db_path=value, results_key='mp', sparsity=sparsity, verbose=verbose)
-    #        elif key == 'snr_criteria' :
-    #            snr_criteria = value
-    #        elif key == 'verbose' :
-    #            verbose = value
-    #        else :
-    #            raise ValueError(f'Unknown algorithm type : {key}')
-    #        
-    #    concatenated_df = pd.concat([pd.DataFrame(data) for data in delay_vs_mse_df.values()], keys=['conv-' + str(key).upper() for key in delay_vs_mse_df.keys()])
-    #    concatenated_df = concatenated_df.reset_index(level=0).rename(columns={'level_0': 'algo_type'})
-    #    if snr_criteria != -1 :
-    #        concatenated_df = concatenated_df.loc[concatenated_df['snr'] == snr_criteria]
-    #    
-    #    return concatenated_df
+                                                
 
     def boxplotDelayVsMSE(self, sparsity:str, overlap_level:int, **kwargs) -> None:
         # Récupérer le DataFrame combiné à partir de la fonction de comparaison
         concatenated_df = self.computeMSEOverlapBoxplot(sparsity, **kwargs)
         overlap_df = concatenated_df.loc[concatenated_df['overlap'] == overlap_level]
         verbose = kwargs.get('verbose', False)
-        
+        time_calc = kwargs.get('time_calc', 'mean')  # Paramètre pour choisir le type de calcul du temps
+
         if verbose:
             print(overlap_df)
 
-        # Extract the delay value of each algo_type
-        max_delay_merged_df = overlap_df.groupby('algo_type')['delay'].max().reset_index()
-        
-        if verbose :
-            print(max_delay_merged_df)
+        # Calculer le délai en fonction de l'option choisie : 'max' ou 'mean'
+        if time_calc == 'max':
+            delay_df = overlap_df.groupby('algo_type')['delay'].max().reset_index()
+        else:  # Par défaut, utilise 'mean'
+            delay_df = overlap_df.groupby('algo_type')['delay'].mean().reset_index()
 
-        plt.figure(figsize=(12, 8))
-
-        # Créer un boxplot pour chaque algo_type basé sur le 'delay' maximum
-        sns.boxplot(x='algo_type', y='local_mse', hue='algo_type', data=overlap_df, palette="flare", whis=1.5, width=0.7, showfliers=False)
-
-        # Superposer un scatter plot pour montrer les points réels
-        #sns.stripplot(x='algo_type', y='mse', data=max_delay_merged_df, hue='delay_max', size=4, palette="dark:.3", linewidth=0, dodge=True)
-
-        # Personnaliser le plot
-        sns.despine(trim=True)
-        plt.title(f'MSE for Different Algorithms for sparsity={sparsity}', fontsize=14)
-        plt.xlabel('Maximum Computing Time (seconds)', fontsize=12)
-        plt.ylabel('MSE', fontsize=12)
-        plt.xticks(fontsize=10)
-        plt.yticks(fontsize=10)
-        plt.grid(True, linestyle='--', alpha=0.6)
-        plt.legend(title='Algorithm Type')
-        plt.show()
-
-    def boxplotDelayVsMSE(self, sparsity:str, overlap_level:int, **kwargs) -> None:
-        # Récupérer le DataFrame combiné à partir de la fonction de comparaison
-        concatenated_df = self.computeMSEOverlapBoxplot(sparsity, **kwargs)
-        overlap_df = concatenated_df.loc[concatenated_df['overlap'] == overlap_level]
-        verbose = kwargs.get('verbose', False)
-        
         if verbose:
-            print(overlap_df)
+            print(delay_df)
 
-        # Extract the delay value of each algo_type
-        max_delay_merged_df = overlap_df.groupby('algo_type')['delay'].max().reset_index()
-        
-        if verbose :
-            print(max_delay_merged_df)
-
-        plt.figure(figsize=(12, 8))
-
-        # Créer un boxplot pour chaque algo_type basé sur le 'delay' maximum
-        sns.boxplot(x='algo_type', y='local_mse', hue='algo_type', data=overlap_df, palette="flare", whis=1.5, width=0.7, showfliers=False)
-
-        # Superposer un scatter plot pour montrer les points réels
-        #sns.stripplot(x='algo_type', y='mse', data=max_delay_merged_df, hue='delay_max', size=4, palette="dark:.3", linewidth=0, dodge=True)
-
-        # Personnaliser le plot
-        sns.despine(trim=True)
-        plt.title(f'MSE for Different Algorithms for sparsity={sparsity}', fontsize=14)
-        plt.xlabel('Maximum Computing Time (seconds)', fontsize=12)
-        plt.ylabel('MSE', fontsize=12)
-        plt.xticks(fontsize=10)
-        plt.yticks(fontsize=10)
-        plt.grid(True, linestyle='--', alpha=0.6)
-        plt.legend(title='Algorithm Type')
-        plt.show()
-
-    def boxplotDelayVsMSE(self, sparsity:str, overlap_level:int, **kwargs) -> None:
-        # Récupérer le DataFrame combiné à partir de la fonction de comparaison
-        concatenated_df = self.computeMSEOverlapBoxplot(sparsity, **kwargs)
-        overlap_df = concatenated_df.loc[concatenated_df['overlap'] == overlap_level]
-        verbose = kwargs.get('verbose', False)
-        
-        if verbose:
-            print(overlap_df)
-
-        # Calculer le délai maximal pour chaque type d'algorithme
-        max_delay_df = overlap_df.groupby('algo_type')['delay'].max().reset_index()
-
-        if verbose :
-            print(max_delay_df)
-
-        # Créer un DataFrame adapté pour le boxplot en utilisant les délais maximaux comme positions
-        algo_types = max_delay_df['algo_type']
-        positions = max_delay_df['delay']
+        # Créer un DataFrame adapté pour le boxplot en utilisant les délais calculés comme positions
+        algo_types = delay_df['algo_type']
+        positions = delay_df['delay']
 
         plt.figure(figsize=(12, 8))
 
         # Couleurs personnalisées pour chaque algo_type
-        colors = ['red', 'blue', 'green', 'purple', 'orange']  # exemple de palette de couleurs
+        colors = ['red', 'blue', 'green', 'purple', 'orange']  # Exemple de palette de couleurs
         
         # Boucler sur chaque type d'algorithme pour tracer son boxplot
-        for idx, (algo_type, position) in enumerate(zip(max_delay_df['algo_type'], max_delay_df['delay'])):
+        for idx, (algo_type, position) in enumerate(zip(algo_types, positions)):
             subset_df = overlap_df[overlap_df['algo_type'] == algo_type]
             subset_df.boxplot(column='local_mse', positions=[position], grid=False, vert=True, widths=0.7, patch_artist=True,
                             showfliers=False,  # Désactiver les fliers
@@ -1648,10 +1509,10 @@ class CSCWorkbench:
                             medianprops=dict(color='yellow'),  # Couleur de la médiane
                             whiskerprops=dict(color='black', linestyle='--'),  # Style des whiskers
                             capprops=dict(color='gray'))  # Style des caps
-            
+
         # Personnalisation du graphique
         plt.title(f'MSE for Different Algorithms at Sparsity {sparsity} and Overlap Level {overlap_level}', fontsize=14)
-        plt.xlabel('Maximum Computing Time (seconds)', fontsize=12)
+        plt.xlabel('Computing Time (seconds)', fontsize=12)
         plt.ylabel('MSE', fontsize=12)
         plt.xticks(positions, labels=[f"{algo} ({pos:.2f}s)" for algo, pos in zip(algo_types, positions)], fontsize=10)
         plt.yticks(fontsize=10)
@@ -1659,6 +1520,186 @@ class CSCWorkbench:
         plt.legend([f"{algo}" for algo in algo_types], title='Algorithm Type')
         plt.show()
 
+    #       _________                 ____________  _________
+    #      / ____<  /  _   _______   /_  __/  _/  |/  / ____/
+    #     / /_   / /  | | / / ___/    / /  / // /|_/ / __/   
+    #    / __/  / /   | |/ (__  )    / / _/ // /  / / /___   
+    #   /_/    /_/    |___/____/    /_/ /___/_/  /_/_____/   
+                                                     
+
+    def computeTimeF1Dataframe(self, sparVar_db_path:str, results_key:str, sparsity:str, pos_err_threshold:int, corr_err_threshold:float, verbose:bool=False) -> Dict:
+        """
+        Compute the time for the MSE persignal.
+        Each row corresponds to a signal.
+        Args :
+            sparVar_db_path (str) : Path to the sparse variables database.
+            results_key (str) : Key of the results in the database.
+            verbose (bool) : If True, print the progress.
+        """
+        # Load the data
+        with open(sparVar_db_path, 'r') as f:
+            output_data = json.load(f)
+
+        data_delay_vs_mse = {
+            'id': [],
+            'snr': [],
+            'tp': [],
+            'fp': [],
+            'fn': [],
+            'delay': []
+        }
+        # Iterate over the outputs
+        for result in tqdm(output_data[results_key], desc=f"Processing {results_key.upper()}"):
+            
+            # Get the signal dictionary
+            signal_id = result['id']
+            signal_snr = result['snr']
+            signal_dict = self.signalDictFromId(signal_id)
+            true_atoms = signal_dict['atoms']
+            signal_sparsity= len(signal_dict['atoms'])
+
+            if signal_sparsity == sparsity :
+                # Get the result dict for the signal sparsity
+                result_dict = result['results'][signal_sparsity-1]
+                approx_atoms = result_dict['atoms']
+                
+                # Compute the F1 metrics
+                tp = self.computeMaxTruePositives(true_atoms, approx_atoms, pos_err_threshold, corr_err_threshold, verbose=verbose)
+                fp = len(true_atoms) - tp
+                fn = len(true_atoms) - tp
+
+                # Append the data
+                data_delay_vs_mse['id'].append(signal_id)
+                data_delay_vs_mse['snr'].append(signal_snr)
+                data_delay_vs_mse['tp'].append(tp)
+                data_delay_vs_mse['fp'].append(fp)
+                data_delay_vs_mse['fn'].append(fn)
+                data_delay_vs_mse['delay'].append(result_dict['delay'])
+            
+        return data_delay_vs_mse
+    
+    def computeTimeF1Comparison(self, sparsity:str, pos_err_threshold:int, corr_err_threshold:float, **kwargs) :
+        """
+        Compute the dataframe of the comparison between computing time and MSE.
+        Args:
+            sparsity (str): Sparsity level.
+        Returns:
+            mean_delay_list (pd.Series): Series of mean delay for each algorithm.
+            mean_f1_score_list (pd.Series): Series of mean F1 score for each algorithm.
+        """
+        plt.figure(figsize=(12, 8)) 
+
+        snr_criteria = -1
+        verbose = False
+
+        # Compute the local MSE per overlap interval for each algorithm
+        delay_vs_f1_df_dict = dict()
+        for key, value in kwargs.items():
+            if verbose :
+                print(f' ~> Processing {key} with {value}')
+            if 'mmp' in key.lower() :
+                delay_vs_f1_df_dict[str(key.lower())] = self.computeTimeF1Dataframe(sparVar_db_path=value, results_key='mmp', sparsity=sparsity,  pos_err_threshold=pos_err_threshold, corr_err_threshold=corr_err_threshold, verbose=verbose)
+            elif 'omp' in key.lower() :
+                delay_vs_f1_df_dict[str(key.lower())] = self.computeTimeF1Dataframe(sparVar_db_path=value, results_key='omp', sparsity=sparsity,  pos_err_threshold=pos_err_threshold, corr_err_threshold=corr_err_threshold, verbose=verbose)
+            elif 'mp' in key.lower() :
+                delay_vs_f1_df_dict[str(key.lower())] = self.computeTimeF1Dataframe(sparVar_db_path=value, results_key='mp', sparsity=sparsity,  pos_err_threshold=pos_err_threshold, corr_err_threshold=corr_err_threshold, verbose=verbose)
+            elif key == 'snr_criteria' :
+                snr_criteria = value
+            elif key == 'verbose' :
+                verbose = value
+            else :
+                raise ValueError(f'Unknown algorithm type : {key}')
+        
+        concatenated_df = pd.concat([pd.DataFrame(data) for data in delay_vs_f1_df_dict.values()], keys=['conv-' + str(key).upper() for key in delay_vs_f1_df_dict.keys()])
+        concatenated_df = concatenated_df.reset_index(level=0).rename(columns={'level_0': 'algo_type'})
+        if snr_criteria != -1 :
+            concatenated_df = concatenated_df.loc[concatenated_df['snr'] == snr_criteria]
+
+        mean_delay_list = concatenated_df.groupby('algo_type')['delay'].mean()
+        mean_f1_score_list = concatenated_df.groupby('algo_type').apply(lambda x: 2 * x['tp'].sum() / (2 * x['tp'].sum() + x['fp'].sum() + x['fn'].sum()))
+        
+        return mean_delay_list, mean_f1_score_list
+
+    def plotTimeF1Comparison(self, sparsity:str, pos_err_threshold:int, corr_err_threshold:float, **kwargs) :
+        """
+        Plot the comparison between computing time and F1 score.
+        """
+        mean_delay_list, mean_f1_score_list = self.computeTimeF1Comparison(sparsity, pos_err_threshold, corr_err_threshold, **kwargs)
+        verbose = kwargs.get('verbose', False)
+        if verbose :
+            print(mean_delay_list)
+            print(mean_f1_score_list)
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.stem(mean_delay_list, mean_f1_score_list, linefmt='b-', markerfmt='bo', basefmt=' ',)
+        ax.set_title(f'Computing time vs and F1 score for different algorithms at sparsity {sparsity}', fontsize=14)
+        ax.set_xlabel('Mean computing time in seconds', fontsize=12)
+        ax.set_ylabel('F1 score', fontsize=12)
+        ax.set_xticklabels([f"{algo} ({delay:.2f}s)" for algo, delay in zip(mean_delay_list.index, mean_delay_list)], fontsize=10)
+        ax.grid(True, linestyle='--', alpha=0.6)
+        plt.show()  
+
+    def plotTimeF1Comparison(self, sparsity:str, pos_err_threshold:int, corr_err_threshold:float, **kwargs):
+        """
+        Plot the comparison between computing time and F1 score.
+        """
+        mean_delay_list, mean_f1_score_list = self.computeTimeF1Comparison(sparsity, pos_err_threshold, corr_err_threshold, **kwargs)
+        verbose = kwargs.get('verbose', False)
+        if verbose:
+            print(mean_delay_list)
+            print(mean_f1_score_list)
+
+        # Définir une palette de couleurs pour distinguer chaque algorithme
+        colors = ['r', 'b', 'g', 'm', 'c']  # red, blue, green, magenta, cyan
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        # Tracer chaque lollipop avec une couleur spécifique
+        for idx, (algo, delay) in enumerate(zip(mean_delay_list.index, mean_delay_list)):
+            ax.stem([delay], [mean_f1_score_list.loc[algo]], linefmt=f'{colors[idx]}-', markerfmt=f'{colors[idx]}o', basefmt=' ', label=f"{algo} ({delay:.2f}s)")
+
+        # Personnalisation du graphique
+        ax.set_title(f'Computing time vs F1 score for different algorithms at sparsity {sparsity}', fontsize=14)
+        ax.set_xlabel('Mean computing time in seconds', fontsize=12)
+        ax.set_ylabel('F1 score', fontsize=12)
+        ax.set_xticks(mean_delay_list)
+        ax.set_xticklabels([f"{delay:.2f}s" for delay in mean_delay_list], fontsize=10, rotation=45)
+        ax.legend(title='Algorithm Details')
+        ax.grid(True, linestyle='--', alpha=0.6)
+        plt.show()
+
+    def plotTimeF1Comparison(self, sparsity:str, pos_err_threshold:int, corr_err_threshold:float, **kwargs):
+        """
+        Plot the comparison between computing time and F1 score.
+        """
+        mean_delay_list, mean_f1_score_list = self.computeTimeF1Comparison(sparsity, pos_err_threshold, corr_err_threshold, **kwargs)
+        verbose = kwargs.get('verbose', False)
+        if verbose:
+            print(mean_delay_list)
+            print(mean_f1_score_list)
+
+        # Trier les données par temps de calcul moyen en ordre décroissant
+        sorted_data = mean_delay_list.sort_values(ascending=False)
+        sorted_f1_scores = mean_f1_score_list.reindex(sorted_data.index)
+
+        fig, ax = plt.subplots(figsize=(12, 8))
+        colors = ['r', 'b', 'g', 'm', 'c']  # Utiliser des couleurs distinctes pour chaque algo
+
+        # Tracer les lollipops en utilisant les données triées
+        for idx, (algo, delay) in enumerate(zip(sorted_data.index, sorted_data)):
+            ax.stem([delay], [sorted_f1_scores.loc[algo]], linefmt=f'{colors[idx % len(colors)]}-', markerfmt=f'{colors[idx % len(colors)]}o', basefmt=' ', label=f"{algo} ({delay:.2f}s)")
+
+        # Configuration des ticks et légendes
+        ax.set_xticks(sorted_data)
+        ax.set_xticklabels([f"{delay:.2f}s" for delay in sorted_data], fontsize=10, rotation=45)
+        
+        ax.set_title(f'Computing time vs F1 score for different algorithms at sparsity {sparsity}', fontsize=14)
+        ax.set_xlabel('Mean computing time in seconds', fontsize=12)
+        ax.set_ylabel('F1 score', fontsize=12)
+        ax.grid(True, linestyle='--', alpha=0.6)
+        ax.legend(title='Algorithm Details', loc='best')  # Utilisation de loc='best' pour optimiser l'emplacement de la légende
+
+        plt.show()
 
 
                                                                                               
