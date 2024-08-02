@@ -1620,54 +1620,6 @@ class CSCWorkbench:
         
         return mean_delay_list, mean_f1_score_list
 
-    def plotTimeF1Comparison(self, sparsity:str, pos_err_threshold:int, corr_err_threshold:float, **kwargs) :
-        """
-        Plot the comparison between computing time and F1 score.
-        """
-        mean_delay_list, mean_f1_score_list = self.computeTimeF1Comparison(sparsity, pos_err_threshold, corr_err_threshold, **kwargs)
-        verbose = kwargs.get('verbose', False)
-        if verbose :
-            print(mean_delay_list)
-            print(mean_f1_score_list)
-
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.stem(mean_delay_list, mean_f1_score_list, linefmt='b-', markerfmt='bo', basefmt=' ',)
-        ax.set_title(f'Computing time vs and F1 score for different algorithms at sparsity {sparsity}', fontsize=14)
-        ax.set_xlabel('Mean computing time in seconds', fontsize=12)
-        ax.set_ylabel('F1 score', fontsize=12)
-        ax.set_xticklabels([f"{algo} ({delay:.2f}s)" for algo, delay in zip(mean_delay_list.index, mean_delay_list)], fontsize=10)
-        ax.grid(True, linestyle='--', alpha=0.6)
-        plt.show()  
-
-    def plotTimeF1Comparison(self, sparsity:str, pos_err_threshold:int, corr_err_threshold:float, **kwargs):
-        """
-        Plot the comparison between computing time and F1 score.
-        """
-        mean_delay_list, mean_f1_score_list = self.computeTimeF1Comparison(sparsity, pos_err_threshold, corr_err_threshold, **kwargs)
-        verbose = kwargs.get('verbose', False)
-        if verbose:
-            print(mean_delay_list)
-            print(mean_f1_score_list)
-
-        # Définir une palette de couleurs pour distinguer chaque algorithme
-        colors = ['r', 'b', 'g', 'm', 'c']  # red, blue, green, magenta, cyan
-
-        fig, ax = plt.subplots(figsize=(12, 8))
-
-        # Tracer chaque lollipop avec une couleur spécifique
-        for idx, (algo, delay) in enumerate(zip(mean_delay_list.index, mean_delay_list)):
-            ax.stem([delay], [mean_f1_score_list.loc[algo]], linefmt=f'{colors[idx]}-', markerfmt=f'{colors[idx]}o', basefmt=' ', label=f"{algo} ({delay:.2f}s)")
-
-        # Personnalisation du graphique
-        ax.set_title(f'Computing time vs F1 score for different algorithms at sparsity {sparsity}', fontsize=14)
-        ax.set_xlabel('Mean computing time in seconds', fontsize=12)
-        ax.set_ylabel('F1 score', fontsize=12)
-        ax.set_xticks(mean_delay_list)
-        ax.set_xticklabels([f"{delay:.2f}s" for delay in mean_delay_list], fontsize=10, rotation=45)
-        ax.legend(title='Algorithm Details')
-        ax.grid(True, linestyle='--', alpha=0.6)
-        plt.show()
-
     def plotTimeF1Comparison(self, sparsity:str, pos_err_threshold:int, corr_err_threshold:float, **kwargs):
         """
         Plot the comparison between computing time and F1 score.
