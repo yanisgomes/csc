@@ -23,25 +23,30 @@
   major tick style={yshift=.5*\pgfkeysvalueof{/pgfplots/major tick length}},
   minor tick style={yshift=.5*\pgfkeysvalueof{/pgfplots/minor tick length}},
   title style={yshift=\baselineskip},
-  xmax={5},
-  ymin={-3.5},
-  height={4\baselineskip},
-  xtick={1,2,3,4,5},
-  minor x tick num={3},
+  xmax={7},
+  ymin={-4.5},
+  height={5\baselineskip},
+  xtick={1,2,3,4,5,6,7},
+  minor x tick num={1},
   x dir={reverse},
   title={CSC algorithms critical difference diagram},
 ]
 
-\draw[treatment line] ([yshift=-2pt] axis cs:2.61890625, 0) |- (axis cs:2.2022395833333337, -2.5)
+\draw[treatment line] ([yshift=-2pt] axis cs:3.220625, 0) |- (axis cs:2.6372916666666666, -2.5)
+  node[treatment label, anchor=west] {conv-MMP81};
+\draw[treatment line] ([yshift=-2pt] axis cs:3.23078125, 0) |- (axis cs:2.6372916666666666, -3.5)
   node[treatment label, anchor=west] {conv-MMP27};
-\draw[treatment line] ([yshift=-2pt] axis cs:2.67046875, 0) |- (axis cs:2.2022395833333337, -3.5)
-  node[treatment label, anchor=west] {conv-MMP10};
-\draw[treatment line] ([yshift=-2pt] axis cs:2.86515625, 0) |- (axis cs:4.035885416666667, -4.0)
+\draw[treatment line] ([yshift=-2pt] axis cs:3.30484375, 0) |- (axis cs:2.6372916666666666, -4.5)
+  node[treatment label, anchor=west] {conv-MMP9};
+\draw[treatment line] ([yshift=-2pt] axis cs:3.54640625, 0) |- (axis cs:6.744895833333333, -5.0)
   node[treatment label, anchor=east] {conv-MMP3};
-\draw[treatment line] ([yshift=-2pt] axis cs:3.22625, 0) |- (axis cs:4.035885416666667, -3.0)
+\draw[treatment line] ([yshift=-2pt] axis cs:4.01390625, 0) |- (axis cs:6.744895833333333, -4.0)
   node[treatment label, anchor=east] {conv-OMP};
-\draw[treatment line] ([yshift=-2pt] axis cs:3.61921875, 0) |- (axis cs:4.035885416666667, -2.0)
+\draw[treatment line] ([yshift=-2pt] axis cs:4.521875, 0) |- (axis cs:6.744895833333333, -3.0)
   node[treatment label, anchor=east] {conv-MP};
+\draw[treatment line] ([yshift=-2pt] axis cs:6.1615625, 0) |- (axis cs:6.744895833333333, -2.0)
+  node[treatment label, anchor=east] {CSC-L1};
+\draw[group line] (axis cs:3.220625, -1.6666666666666667) -- (axis cs:3.23078125, -1.6666666666666667);
 
 \end{axis}
 \end{tikzpicture}
