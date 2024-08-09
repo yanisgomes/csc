@@ -299,7 +299,7 @@ class CSCWorkbench:
                 data_errors['algo_step'].append(i+1)
         return data_errors
     
-    def computeOMPPositionErrorsPerStep(self, db_path:str) -> Dict:
+    def sparVar_computeOMPPositionErrorsPerStep(self, db_path:str) -> Dict:
         """
         Compute the position errors for all the signal on a MMPDF database
         """
@@ -316,15 +316,17 @@ class CSCWorkbench:
             'algo_step': []
         }
         # Iterate over the outputs
-        for result in output_data['omp'] :
+        for sparVar_results_dict in output_data['omp'] :
             # Get signal and approximation atoms
-            signal_id = result['id']
+            signal_id = sparVar_results_dict['id']
             signal_dict = self.signalDictFromId(signal_id)
-            signal_atoms = signal_dict['atoms']
-            approx_atoms = result['atoms']
+            true_atoms = signal_dict['atoms']
+            signal_sparsity = len(true_atoms)
+            result_dict = sparVar_results_dict['results'][signal_sparsity-1]
+            approx_atoms = result_dict['atoms']
 
             # Compute errors
-            pos_error_per_step =self.positionErrorPerStep(signal_atoms, approx_atoms)
+            pos_error_per_step =self.positionErrorPerStep(true_atoms, approx_atoms)
             # Append data
             for i, err in enumerate(pos_error_per_step):
                 data_errors['id'].append(signal_id)
@@ -392,11 +394,11 @@ class CSCWorkbench:
         plt.legend(title='Sparsity', loc='best')
         plt.show()
         
-    def sortByPositionErrorAtStep(self, db_path:str, step:int, ascending:bool=True) :
+    def sparVar_sortByPositionErrorAtStep(self, db_path:str, step:int, ascending:bool=True) :
         """
         Plot the boxplot of the position errors.
         """
-        data_errors = self.computeOMPPositionErrorsPerStep(db_path)
+        data_errors = self.sparVar_computeOMPPositionErrorsPerStep(db_path)
         df_all_steps = pd.DataFrame(data_errors)
         df = df_all_steps.loc[df_all_steps['algo_step'] == step]
         df = df.sort_values(by='abs_pos_err', ascending=ascending)
@@ -2810,4 +2812,236 @@ class CSCWorkbench:
             reverse_x = True,
             axis_options = {"title": diag_title},
         )
+
+    #   ██████╗ ███████╗██████╗  ██████╗ ██████╗ ████████╗
+    #   ██╔══██╗██╔════╝██╔══██╗██╔═══██╗██╔══██╗╚══██╔══╝
+    #   ██████╔╝█████╗  ██████╔╝██║   ██║██████╔╝   ██║   
+    #   ██╔══██╗██╔══╝  ██╔═══╝ ██║   ██║██╔══██╗   ██║   
+    #   ██║  ██║███████╗██║     ╚██████╔╝██║  ██║   ██║   
+    #   ╚═╝  ╚═╝╚══════╝╚═╝      ╚═════╝ ╚═╝  ╚═╝   ╚═╝   
+                                                  
+    def plotOrthogonalSignalErrorPerOverlapFromId(self, db_path:str, db_key:str, id:int, cmap:str='plasma') -> None :
+        """
+        Plot the signal with a conditional coloring according to the overlap vector.
+        Args:
+            db_path (str): Path to the database with a sparVar structure
+            id (int): Signal ID
+        """
+        # Load the data
+        with open(db_path, 'r') as f:
+            output_data = json.load(f)
+            saprVar_results_dict = next((result for result in output_data[db_key] if result['id'] == id), None)
+        
+        # Reconstruct the denoised signal
+        signal_dict = self.signalDictFromId(id)
+        true_atoms = signal_dict['atoms']
+        noisy_signal = signal_dict['signal']
+        true_signal = np.zeros_like(noisy_signal)
+        for true_atom in true_atoms:
+            zs_atom = ZSAtom.from_dict(true_atom)
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            true_signal += zs_atom.getAtomInSignal(signal_length=len(noisy_signal), offset=true_atom['x'])
+        signal_sparsity = len(true_atoms)
+
+        result_dict = saprVar_results_dict['results'][signal_sparsity-1]
+        approx_atoms = result_dict['atoms']
+        approx_signal, _ = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], approx_atoms)
+
+        # Build the figure
+        fig, axs = plt.subplots(2, 1, figsize=(15, 3*2), sharex=True)
+        
+        # Get the overlap vector of the signal
+        overlap_vector = self.getSignalOverlapVectorFromId(id)
+        overlap_intervals, overlap_intervals_values = self.getSignalOverlapIntervalsFromId(id)
+
+        # Color the background based on overlap
+        cmap = plt.get_cmap(cmap)
+        max_overlap = max(overlap_vector)
+        norm = Normalize(vmin=0, vmax=max_overlap)
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+
+        for idx, val in enumerate(overlap_vector):
+            axs[0].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+            axs[1].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+
+        # Plot the signals
+        axs[0].plot(noisy_signal, label='Noisy signal', color='k', alpha=0.4, lw=4)
+        axs[0].plot(true_signal, label='True signal', color='r', lw=2)
+        axs[0].plot(approx_signal, label='Reconstruction', color='b')
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+
+        mse_signal = np.zeros_like(true_signal)
+        for (start, end), val in zip(overlap_intervals, overlap_intervals_values):
+            # Compute the mse on the interval
+            mse_on_interval = np.mean((true_signal[start:end] - approx_signal[start:end])**2)
+            # Fill the mse signals
+            mse_signal[start:end] = mse_on_interval*np.ones(end-start)
+
+        # Plot the constant by interval MSE
+        axs[1].plot(mse_signal, label='OMP MSE', color='b', lw=1, alpha=0.9)
+        axs[1].legend(title='MSE per overlap interval', loc='best')
+        axs[1].axis('off')
+
+        # Add a colorbar
+        fig.colorbar(sm, ax=axs, orientation='vertical', label='Overlap level', pad=0.01, alpha=0.3)
+        plt.show()
+
+    def plot_MMP_OMP_comparisonPerOverlapFromId(self, mmp_db_path:str, omp_db_path:str, id:int, cmap:str='plasma') -> None :
+        """
+        Plot the signal with a conditional coloring according to the overlap vector.
+        Args:
+            db_path (str): Path to the database with a sparVar structure
+            id (int): Signal ID
+        """
+        # Load the data from the MMP database
+        with open(mmp_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_sparVar_results_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+
+        # Load the data from the OMP database
+        with open(omp_db_path, 'r') as f:
+            output_data = json.load(f)
+            omp_sparVar_results_dict = next((result for result in output_data['omp'] if result['id'] == id), None)
+        
+        # Reconstruct the denoised signal
+        signal_dict = self.signalDictFromId(id)
+        true_atoms = signal_dict['atoms']
+        noisy_signal = signal_dict['signal']
+        true_signal = np.zeros_like(noisy_signal)
+        for true_atom in true_atoms:
+            zs_atom = ZSAtom.from_dict(true_atom)
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            true_signal += zs_atom.getAtomInSignal(signal_length=len(noisy_signal), offset=true_atom['x'])
+        signal_sparsity = len(true_atoms)
+
+        # Get the MMP results
+        mmp_result_dict = mmp_sparVar_results_dict['results'][signal_sparsity-1]
+        mmp_approx_atoms = mmp_result_dict['atoms']
+        mmp_approx_signal, _ = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], mmp_approx_atoms)
+
+        # Get the OMP results
+        omp_result_dict = omp_sparVar_results_dict['results'][signal_sparsity-1]
+        omp_approx_atoms = omp_result_dict['atoms']
+        omp_approx_signal, _ = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], omp_approx_atoms)
+    
+        # Build the figure
+        fig, axs = plt.subplots(2, 1, figsize=(15, 3*2), sharex=True)
+        
+        # Get the overlap vector of the signal
+        overlap_vector = self.getSignalOverlapVectorFromId(id)
+        overlap_intervals, overlap_intervals_values = self.getSignalOverlapIntervalsFromId(id)
+
+        # Color the background based on overlap
+        cmap = plt.get_cmap(cmap)
+        max_overlap = max(overlap_vector)
+        norm = Normalize(vmin=0, vmax=max_overlap)
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+
+        for idx, val in enumerate(overlap_vector):
+            axs[0].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+            axs[1].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+
+        # Plot the signals
+        axs[0].plot(noisy_signal, label='Noisy signal', color='k', alpha=0.4, lw=4)
+        axs[0].plot(true_signal, label='True signal', color='r', lw=2)
+        axs[0].plot(omp_approx_signal, label='conv-OMP', color='b')
+        axs[0].plot(mmp_approx_signal, label='conv-MMP', color='orange')
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+
+        mmp_mse_signal = np.zeros_like(true_signal)
+        omp_mse_signal = np.zeros_like(true_signal)
+        for (start, end), val in zip(overlap_intervals, overlap_intervals_values):
+            # Compute the mse on the interval
+            mmp_mse_on_interval = np.mean((true_signal[start:end] - mmp_approx_signal[start:end])**2)
+            omp_mse_on_interval = np.mean((true_signal[start:end] - omp_approx_signal[start:end])**2)
+            # Fill the mse signals
+            mmp_mse_signal[start:end] = mmp_mse_on_interval*np.ones(end-start)
+            omp_mse_signal[start:end] = omp_mse_on_interval*np.ones(end-start)
+
+        # Plot the constant by interval MSE
+        axs[1].plot(omp_mse_signal, label='conv-OMP MSE', color='b', alpha=0.8)
+        axs[1].plot(mmp_mse_signal, label='conv-MMP MSE', color='orange', alpha=0.8)
+        axs[1].legend(title='MSE per overlap interval', loc='best')
+        axs[1].axis('off')
+
+        # Add a colorbar
+        fig.colorbar(sm, ax=axs, orientation='vertical', label='Overlap level', pad=0.01, alpha=0.3)
+        plt.show()
+
+    def sparVar_computeMMPOMPMSE(self, mmp_db_path:str, omp_db_path:str) -> Dict:
+        """
+        Compute the position errors for all the signals for a sparVar database.
+        """
+        # Load the data from the MMP database
+        with open(mmp_db_path, 'r') as f:
+            mmp_output_data = json.load(f)
+
+        # Load the data from the OMP database
+        with open(omp_db_path, 'r') as f:
+            omp_output_data = json.load(f)
+
+
+        data_errors = {
+            'id': [],
+            'snr': [],
+            'sparsity': [],
+            'omp-mse': [],  
+            'mmp-mse': [],
+            'mse-diff': [],
+        }
+        # Iterate over the outputs
+        for mmp_sparVar_results_dict, omp_sparVar_results_dict in zip(mmp_output_data['mmp'] , omp_output_data['omp']) :
+
+            # Get the MMP approximation
+            signal_id = mmp_sparVar_results_dict['id']
+            assert signal_id == omp_sparVar_results_dict['id'], 'The signal ids are different'
+
+            # Reconstruct the denoised signal
+            signal_dict = self.signalDictFromId(signal_id)
+            true_atoms = signal_dict['atoms']
+            noisy_signal = signal_dict['signal']
+            true_signal = np.zeros_like(noisy_signal)
+            for true_atom in true_atoms:
+                zs_atom = ZSAtom.from_dict(true_atom)
+                zs_atom.padBothSides(self.dictionary.getAtomsLength())
+                true_signal += zs_atom.getAtomInSignal(signal_length=len(noisy_signal), offset=true_atom['x'])
+            signal_sparsity = len(true_atoms)
+
+            # Get the MMP results
+            mmp_result_dict = mmp_sparVar_results_dict['results'][signal_sparsity-1]
+            mmp_approx_atoms = mmp_result_dict['atoms']
+            mmp_approx_signal, _ = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], mmp_approx_atoms)
+
+            # Get the OMP results
+            omp_result_dict = omp_sparVar_results_dict['results'][signal_sparsity-1]
+            omp_approx_atoms = omp_result_dict['atoms']
+            omp_approx_signal, _ = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], omp_approx_atoms)
+
+            # Get the MSE
+            omp_mse = np.mean((true_signal - omp_approx_signal)**2)
+            mmp_mse = np.mean((true_signal - mmp_approx_signal)**2)
+
+            # Compute errors
+            data_errors['id'].append(signal_id)
+            data_errors['snr'].append(signal_dict['snr'])
+            data_errors['sparsity'].append(signal_dict['sparsity'])
+            data_errors['omp-mse'].append(omp_mse)
+            data_errors['mmp-mse'].append(mmp_mse)
+            data_errors['mse-diff'].append((omp_mse - mmp_mse)/omp_mse)
+            
+        return data_errors
+    
+    def sparVar_sortByBestMSEDiff(self, mmpdf_db_path:str, omp_db_path:str, ascending:bool=True) :
+        """
+        Sort the position errors by the relative difference between OMP and MMP MSE
+        """
+        data_errors = self.sparVar_computeMMPOMPMSE(mmpdf_db_path, omp_db_path)
+        df= pd.DataFrame(data_errors)
+        df = df.sort_values(by='mse-diff', ascending=ascending)
+        return df
+        
         
