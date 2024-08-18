@@ -13,6 +13,10 @@ import matplotlib.pyplot as plt
 from scipy.sparse.linalg import LinearOperator, lsqr
 from collections import Counter
 
+import matplotlib.gridspec as gridspec
+from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator
+
 from joblib import Parallel, delayed
 
 from .atoms import ZSAtom
@@ -343,20 +347,44 @@ class MMPTree() :
     
     @staticmethod
     def plotComputationFromTree(sparsity: int, connections: int):
-        computations = MMPTree.getComputedNodesFromTree(sparsity, connections)
-        
-        plt.figure(figsize=(10, 6))
-        plt.plot(computations, marker='', linestyle='-', linewidth=2, color='royalblue')
-        plt.title(f'Number of Computed Nodes Per Branch Number for K={sparsity} and L={connections}', fontsize=16)
-        plt.xlabel('Branch Number', fontsize=14)
-        plt.ylabel('Computed Nodes', fontsize=14)
-        plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=12)
-        plt.ylim(0, max(computations)+1)
+        fig = plt.figure(figsize=(10, 9))
+        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 2])
+
+        axes = [fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, :])]
+        sparsities = [sparsity, sparsity + 1, sparsity + 2]
+
+        ylim_factor_list = [1.8, 2.2, 1.1]
+
+        for ax, ylim_factor, current_sparsity in zip(axes, ylim_factor_list, sparsities):
+            computations = MMPTree.getComputedNodesFromTree(current_sparsity, connections)
+            max_computation = max(computations)
+            nb_total_nodes = len(computations) * max_computation
+            nb_computed_nodes = sum(computations)
+            computation_saved_prct = 100 * (nb_total_nodes - nb_computed_nodes) / nb_total_nodes
+
+            # Plotting
+            ax.plot(computations, marker='', linestyle='-', linewidth=1.5, color='royalblue', label=f'Total computed nodes = {nb_computed_nodes}')
+            ax.plot([0, len(computations) - 1], [max_computation, max_computation], 'r--', linewidth=1.5, label=f'Total nodes in the tree = {nb_total_nodes}')
+            ax.fill_between(range(len(computations)), computations, color='skyblue', alpha=0.4)
+            fill_between_handle = ax.fill_between(range(len(computations)), computations, max_computation, color='lightgreen', hatch='//', alpha=0.2)
+
+            ax.set_xlabel('Branch Number')
+            ax.set_ylabel('Computed Nodes')
+            ax.set_title(f'Nodes Computed for K={current_sparsity} and L={connections}')
+            ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+            ax.set_ylim(0, max(computations) + ylim_factor)
+
+            # Legend setup
+            handles, labels = ax.get_legend_handles_labels()
+            handles.append(Patch(facecolor='lightgreen', label=f"Computation Saved = {computation_saved_prct:.2f}%", alpha=0.4))
+            ax.legend(handles=handles, loc='best')
+            # Ensuring only integer labels on the y-axis
+            ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+
         plt.tight_layout()
         plt.show()
-        
+
+
     def MMPDFBranchFromPath(self, path:List[int], verbose=False) :
         """
         Build a branch from a path of atom indices.
@@ -394,6 +422,38 @@ class MMPTree() :
             # Build the branch from the path
             self.leaves_nodes.append(self.MMPDFBranchFromPath(self.leaves_paths[-1], verbose=verbose))
             branch_counter += 1
+
+    def runBlankMMPDF(self, branches_number:int, verbose=False) :
+        """
+        Simulate a run of the MMP algorithm with a depth-first strategy.
+        """
+        assert branches_number > 0, "branches_number must be greater than 0"
+        #assert branches_number <= self.connections ** self.sparsity, "branches_number must be less than the number of possible paths"
+        nb_branches = min(branches_number, self.connections ** self.sparsity)
+        # Initialize the tree structure
+        self.init_structure()
+
+        total_computed_nodes = 0
+        total_explored_nodes = 0
+
+        while len(self.leaves_paths) < nb_branches :
+            # Depth-first search for the next path
+            next_path = MMPTree.getCandidatePath(self.sparsity, self.connections, len(self.leaves_paths) + 1)
+            self.leaves_paths.append(next_path)
+
+            if verbose :
+                computed_nodes = MMPTree.getComputedNodesFromPath(self.leaves_paths[-1])
+                nb_nodes = self.sparsity
+                prct_computation_saved = 100 * (nb_nodes - computed_nodes) / nb_nodes
+                print(f"Reused nodes proportion = {prct_computation_saved}%")
+
+                total_computed_nodes += computed_nodes
+                total_explored_nodes += nb_nodes
+
+        if verbose :
+            print(f"Total computed nodes = {total_computed_nodes}")
+            print(f"Total explored nodes = {total_explored_nodes}")
+            print(f"Total computation saved = {100 * (total_explored_nodes - total_computed_nodes) / total_explored_nodes}")
 
     def getResult(self) -> Tuple[np.ndarray, List[dict]]:
         """

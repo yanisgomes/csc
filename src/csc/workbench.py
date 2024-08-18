@@ -89,6 +89,19 @@ class CSCWorkbench:
             raise ValueError("Data not loaded. Call load_data() first.")
         dict_signal = next((item for item in self.signals_data['signals'] if item['id'] == id), None)
         return dict_signal
+
+    def firstSignalAtSparity(self, sparsity:int) -> Dict:
+        """
+        Get the first signal at a given sparsity.
+        Args:
+            sparsity (int): Signal sparsity.
+        Returns:
+            dict: Signal dictionary.
+        """
+        if not self.loaded:
+            raise ValueError("Data not loaded. Call load_data() first.")
+        dict_signal = next((item for item in self.signals_data['signals'] if item['sparsity'] == sparsity), None)
+        return dict_signal
     
     @staticmethod
     def dictFromId(db_path:str, key:str, id:int) -> Dict:
@@ -1459,12 +1472,12 @@ class CSCWorkbench:
             print(concatenated_df)
         sns.boxplot(x='overlap', y='local_mse', hue='algo_type', data=concatenated_df, palette="flare", fliersize=2, whis=1.5, showfliers=False)
         sns.despine(trim=True)
-        plt.title('Local MSE by overlap level per interval', fontsize=14)
-        plt.xlabel('Overlap >=', fontsize=12)
-        plt.ylabel('Local MSE', fontsize=12)
+
+        plt.xlabel("Nombre d'atomes superposés par intervalle", fontsize=12)
+        plt.ylabel('MSE locale', fontsize=12)
         plt.xticks(fontsize=10)
         plt.yticks(fontsize=10)
-        plt.legend(title='Algorithm', loc='best')
+        plt.legend(title='Algorithmes', loc='best')
         plt.show()
 
     #       __  ________ ______                 ____________  _________
