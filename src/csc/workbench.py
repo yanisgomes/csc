@@ -22,6 +22,8 @@ from .utils import *
 
 from joblib import Parallel, delayed
 
+from matplotlib.cm import get_cmap
+
 from alphacsc.update_z import update_z
 
 from matplotlib.colors import Normalize
@@ -1622,6 +1624,8 @@ class CSCWorkbench:
                 snr_criteria = value
             elif key == 'verbose' :
                 verbose = value
+            elif key == 'figsize' :
+                pass
             else :
                 raise ValueError(f'Unknown algorithm type : {key}')
         
@@ -1641,6 +1645,7 @@ class CSCWorkbench:
         """
         mean_delay_list, mean_f1_score_list = self.computeTimeF1Comparison(sparsity, pos_err_threshold, corr_err_threshold, **kwargs)
         verbose = kwargs.get('verbose', False)
+        figsize = kwargs.get('figsize', (12, 8))
         if verbose:
             print(mean_delay_list)
             print(mean_f1_score_list)
@@ -1649,7 +1654,7 @@ class CSCWorkbench:
         sorted_data = mean_delay_list.sort_values(ascending=False)
         sorted_f1_scores = mean_f1_score_list.reindex(sorted_data.index)
 
-        fig, ax = plt.subplots(figsize=(12, 8))
+        fig, ax = plt.subplots(figsize=figsize)
         colors = ['r', 'b', 'g', 'm', 'c']  # Utiliser des couleurs distinctes pour chaque algo
 
         # Tracer les lollipops en utilisant les données triées
@@ -1668,6 +1673,43 @@ class CSCWorkbench:
 
         plt.show()
 
+    def plotTimeF1Comparison2(self, sparsity:str, pos_err_threshold:int, corr_err_threshold:float, **kwargs):
+        """
+        Plot the comparison between computing time and F1 score using a twilight_twist color gradient.
+        """
+        mean_delay_list, mean_f1_score_list = self.computeTimeF1Comparison(sparsity, pos_err_threshold, corr_err_threshold, **kwargs)
+        verbose = kwargs.get('verbose', False)
+        figsize = kwargs.get('figsize', (12, 8))
+        if verbose:
+            print(mean_delay_list)
+            print(mean_f1_score_list)
+
+        # Sort the data by mean computing time in descending order
+        sorted_data = mean_delay_list.sort_values(ascending=False)
+        sorted_f1_scores = mean_f1_score_list.reindex(sorted_data.index)
+
+        fig, ax = plt.subplots(figsize=figsize)
+        cmap = get_cmap('twilight_shifted')  # Using the twilight_shifted colormap for elegance
+
+        # Number of unique colors needed
+        num_colors = len(sorted_data)
+
+        # Plotting the lollipops using sorted data
+        for idx, (algo, delay) in enumerate(zip(sorted_data.index, sorted_data)):
+            color = cmap(idx / num_colors)  # Calculate color from the colormap
+            ax.stem([delay], [sorted_f1_scores.loc[algo]], linefmt=f'{color}-', markerfmt=f'{color}o', basefmt=' ', label=f"{algo} ({delay:.2f}s)")
+
+        # Configure ticks and labels
+        ax.set_xticks(sorted_data)
+        ax.set_xticklabels([f"{delay:.2f}s" for delay in sorted_data], fontsize=10, rotation=45)
+
+        ax.set_title(f'Computing time vs F1 score for different algorithms at sparsity {sparsity}', fontsize=14)
+        ax.set_xlabel('Mean computing time in seconds', fontsize=12)
+        ax.set_ylabel('F1 score', fontsize=12)
+        ax.grid(True, linestyle='--', alpha=0.6)
+        ax.legend(title='Algorithm Details', loc='best')  # Optimize the placement of the legend
+
+        plt.show()
 
                                                                                               
 # 8 8888     ,o888888o.           .8.            d888888o.      d888888o.   8 888888888o   
@@ -3056,5 +3098,137 @@ class CSCWorkbench:
         df= pd.DataFrame(data_errors)
         df = df.sort_values(by='mse-diff', ascending=ascending)
         return df
+
+    def plot_MMP_OMP_decompositionPerOverlapFromId(self, mmp_db_path:str, omp_db_path:str, id:int, cmap:str='plasma', figsize=(18, 16)) -> None :
+        """
+        Plot the signal with a conditional coloring according to the overlap vector.
+        Args:
+            db_path (str): Path to the database with a sparVar structure
+            id (int): Signal ID
+        """
+        # Load the data from the MMP database
+        with open(mmp_db_path, 'r') as f:
+            output_data = json.load(f)
+            mmp_sparVar_results_dict = next((result for result in output_data['mmp'] if result['id'] == id), None)
+
+        # Load the data from the OMP database
+        with open(omp_db_path, 'r') as f:
+            output_data = json.load(f)
+            omp_sparVar_results_dict = next((result for result in output_data['omp'] if result['id'] == id), None)
+        
+        # Build the figure
+        fig, axs = plt.subplots(4, 1, figsize=figsize, sharex=True)
+        
+        # Get the overlap vector of the signal
+        overlap_vector = self.getSignalOverlapVectorFromId(id)
+        overlap_intervals, overlap_intervals_values = self.getSignalOverlapIntervalsFromId(id)
+
+        # Color the background based on overlap
+        cmap = plt.get_cmap(cmap)
+        max_overlap = max(overlap_vector)
+        norm = Normalize(vmin=0, vmax=max_overlap)
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+
+        for idx, val in enumerate(overlap_vector):
+            axs[0].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+            axs[1].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+            axs[2].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+            axs[3].axvspan(idx, idx+1, facecolor=cmap(norm(val)), alpha=0.3)
+
+        # Reconstruct the denoised signal
+        signal_dict = self.signalDictFromId(id)
+        true_atoms = signal_dict['atoms']
+        noisy_signal = signal_dict['signal']
+        true_signal = np.zeros_like(noisy_signal)
+        pltOffset = max(np.abs(noisy_signal))*1.2
+        for i, true_atom in enumerate(true_atoms):
+            zs_atom = ZSAtom.from_dict(true_atom)
+            zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = zs_atom.getAtomInSignal(signal_length=len(noisy_signal), offset=true_atom['x'])
+            true_signal += atom_signal
+
+        signal_sparsity = len(true_atoms)
+
+        plot_lw = 1.2
+        plot_alpha = 0.8
+        # Get the OMP results
+        omp_result_dict = omp_sparVar_results_dict['results'][signal_sparsity-1]
+        omp_approx_atoms = omp_result_dict['atoms']
+        omp_approx_signal, omp_activations = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], omp_approx_atoms)
+        # Get the OMP matching
+        omp_matching = self.computeMatchingPosition(true_atoms, omp_approx_atoms)
+        sorted_omp_matching = sorted(omp_matching, key=lambda x: int(x[0]['x']))
+        # Plot the matching sorted by position
+        for i, omp_match in enumerate(sorted_omp_matching):
+            # True atom
+            true_atom = omp_match[0]
+            true_zs_atom = ZSAtom.from_dict(true_atom)   
+            true_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            true_atom_signal = true_zs_atom.getAtomInSignal(signal_length=len(noisy_signal), offset=true_atom['x'])
+            axs[1].plot(true_atom_signal + i*pltOffset, label=f'True atom n°{i} at x={true_atom["x"]}', color='r', lw=plot_lw, alpha=plot_alpha)
+            # OMP approx atom
+            omp_approx_atom = omp_match[1]
+            omp_zs_atom = ZSAtom.from_dict(omp_approx_atom)
+            omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            omp_atom_signal = omp_zs_atom.getAtomInSignal(signal_length=len(noisy_signal), offset=omp_approx_atom['x'])
+            axs[1].plot(omp_atom_signal + i*pltOffset, label=f'OMP approx atom n°{i} at x={omp_approx_atom["x"]}', color='b', lw=plot_lw, alpha=plot_alpha)
+            omp_atom_corr = np.correlate(true_atom_signal, omp_atom_signal, mode='valid')
+            axs[1].text(len(omp_atom_signal), i*pltOffset + pltOffset*0.2, f'Correlation = {100*omp_atom_corr[0]:.2f}%', color='k', fontsize=12, ha='right')
+        axs[1].axis('off')
+
+        # Get the MMP results
+        mmp_result_dict = mmp_sparVar_results_dict['results'][signal_sparsity-1]
+        mmp_approx_atoms = mmp_result_dict['atoms']
+        mmp_approx_signal, mmp_activations = self.dictionary.getSignalProjectionFromAtoms(signal_dict['signal'], mmp_approx_atoms)
+        # Get the MMP matching
+        mmp_matching = self.computeMatchingPosition(true_atoms, mmp_approx_atoms)
+        sorted_mmp_matching = sorted(mmp_matching, key=lambda x: int(x[0]['x']))
+        # Plot the matching sorted by position
+        for i, mmp_match in enumerate(sorted_mmp_matching):
+            # True atom
+            true_atom = mmp_match[0]
+            true_zs_atom = ZSAtom.from_dict(true_atom)
+            true_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            true_atom_signal = zs_atom.getAtomInSignal(signal_length=len(noisy_signal), offset=true_atom['x'])
+            axs[2].plot(true_atom_signal + i*pltOffset, label=f'True atom n°{i} at x={true_atom["x"]}', color='r', lw=plot_lw, alpha=plot_alpha)
+            # MMP approx atom
+            mmp_approx_atom = mmp_match[1]
+            mmp_zs_atom = ZSAtom.from_dict(mmp_approx_atom)
+            mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            mmp_atom_signal = zs_atom.getAtomInSignal(signal_length=len(noisy_signal), offset=mmp_approx_atom['x'])
+            axs[2].plot(mmp_atom_signal + i*pltOffset, label=f'MMP approx atom n°{i} at x={mmp_approx_atom["x"]}', color='orange', lw=plot_lw, alpha=plot_alpha)
+            mmp_atom_corr = np.correlate(true_atom_signal, mmp_atom_signal, mode='valid')
+            axs[2].text(len(mmp_atom_signal), i*pltOffset + pltOffset*0.2, f'Correlation = {100*mmp_atom_corr[0]:.2f}%', color='k', fontsize=12, ha = 'right')
+        axs[2].axis('off')
+
+        # Plot the signals
+        axs[0].plot(noisy_signal, label='Noisy signal', color='k', alpha=0.4, lw=4)
+        axs[0].plot(true_signal, label='True signal', color='r', lw=2)
+        axs[0].plot(omp_approx_signal, label='conv-OMP', color='b')
+        axs[0].plot(mmp_approx_signal, label='conv-MMP', color='orange')
+        axs[0].legend(loc='best')
+        axs[0].axis('off')
+
+        # Compute the local errors per overlap interval
+        mmp_mse_signal = np.zeros_like(true_signal)
+        omp_mse_signal = np.zeros_like(true_signal)
+        for (start, end), val in zip(overlap_intervals, overlap_intervals_values):
+            # Compute the mse on the interval
+            mmp_mse_on_interval = np.mean((true_signal[start:end] - mmp_approx_signal[start:end])**2)
+            omp_mse_on_interval = np.mean((true_signal[start:end] - omp_approx_signal[start:end])**2)
+            # Fill the mse signals
+            mmp_mse_signal[start:end] = mmp_mse_on_interval*np.ones(end-start)
+            omp_mse_signal[start:end] = omp_mse_on_interval*np.ones(end-start)
+
+        # Plot the constant by interval MSE
+        axs[3].plot(omp_mse_signal, label='conv-OMP MSE', color='b', alpha=0.8)
+        axs[3].plot(mmp_mse_signal, label='conv-MMP MSE', color='orange', alpha=0.8)
+        axs[3].legend(title='MSE per overlap interval', loc='best')
+        axs[3].axis('off')
+
+        # Add a colorbar
+        fig.colorbar(sm, ax=axs, orientation='vertical', label='Overlap level', pad=0.01, alpha=0.3)
+        plt.show()
         
         
