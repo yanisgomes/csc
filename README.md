@@ -17,6 +17,38 @@
 pip install csc
 ```
 
+## Organisation du repo
+
+### src/csc
+
+#### ``atoms.py``
+- ``ZSATom`` : un objet atome correspond à une fonction paramétrique générant un signal rembourré avec des zéros si besoin.
+
+#### ``dictionary.py``
+- ``ZSDictionary`` : un objet dictionnaire est une collection de ``ZSAtom`` correspondant à une matrice de mesure dans le contexte convolutionnel. C'est à partir de l'objet dictionnaire qu'on génére une base de données de signaux synthétiques ou une base de données de résultats pour un algorithme donné à partir de signaux.
+
+#### ``mmp.py``
+- ``MMPNode`` : un objet équivalent à une seule itération dans une boucle d'OMP, c'est-à-dire un projection d'un résidu sur le dictionnaire à partir d'un signal et d'un index d'activation.
+- ``MMPTree`` : un objet structurant des ``MMPNode`` entre eux afin de constituer un arbre de recherche de solution selon la stratégie _depth first_ de l'algorithme **Multipath Matching Pursuit**.
+
+#### ``workbench.py``
+- ``CSCWorkbench`` : un objet associé à un dictionnaire et une base de données de signaux synthétiques pour implémenter différents types d'expériences.
+
+#### ``utils.py``
+Des fonctions génériques utiles dans les autres programmes sources.
+
+### examples
+Contient des notebooks utilisant les objets des fichiers sources pour les besoin de notre recherche. 
+
+### tools
+Regroupe les notebooks pour générer des bases de données synthétiques ou des bases de données résultats selon différents paramètres. Leur exécution est paramétrable selon le serveur depuis lequel le fichier est exécuté. Les pipelines sont implémentées pour paralléliser les calculs sur les serveurs distants.
+
+### tests
+Regroupe les notebooks de travail importants marquant un point de sauvegarde dans l'avancement de l'implémentation du package.
+
+### experiences
+Regroupe les notebooks spécifiques aux expériences menés dans le cadre de la contribution apportée par le _conolutional-MMP_
+
 ## Données synthétiques
 
 Au cours de l'implémentation des expériences différentes bases de données de signaux synthétiques données ont été générées. Les derbières versions contiennent 3200 signaux, chaque signal ayant un ``id`` unique. Les signaux sont générés par batch de 200 pour un couple de valeur (``SPARSITY``, ``SNR``). Les valeurs de ces deux paramètres évoluent dans les intervalles ci-dessous :
