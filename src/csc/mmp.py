@@ -19,7 +19,7 @@ from matplotlib.ticker import MaxNLocator
 
 from joblib import Parallel, delayed
 
-from .atoms import ZSAtom
+from .atoms import CSCAtom
 from .utils import *
 
 class MMPNode:
@@ -114,7 +114,7 @@ class MMPNode:
     def getChildren(self) -> List['MMPNode']:
         return self.children
     
-    def getAtom(self) -> ZSAtom:
+    def getAtom(self) -> CSCAtom:
         if self.isRoot() :
             return None
         return self.atom
