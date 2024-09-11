@@ -32,15 +32,15 @@ def der_zs_formula(b, sigma, x, y):
 
     return der_Hr, der_Ha
 
-class ZSAtom() :
+class CSCAtom() :
     STEP = 0.001
     SUPPORT_THRESHOLD = 0.001
 
     def __init__(self, b, y, sigma) :
         # Atom step
-        self.step = ZSAtom.STEP
+        self.step = CSCAtom.STEP
         # Support threshold
-        self.support_threshold = ZSAtom.SUPPORT_THRESHOLD
+        self.support_threshold = CSCAtom.SUPPORT_THRESHOLD
         # Apply the ZS formula
         xmin = -b - 1
         xmax = b + 1
@@ -58,7 +58,7 @@ class ZSAtom() :
         self.params = {'b': b, 'y': y, 'sigma': new_sigma}
 
         # Find the largest interval where the template is not entirely smaller than a threshold.
-        tmp = np.diff((self.values > ZSAtom.SUPPORT_THRESHOLD).astype(int))
+        tmp = np.diff((self.values > CSCAtom.SUPPORT_THRESHOLD).astype(int))
         start = np.argwhere(tmp == 1).flatten()[0]
         end = np.argwhere(tmp == -1).flatten()[-1]
         self.x = self.x[start:end]
@@ -70,7 +70,7 @@ class ZSAtom() :
         self.position = self.x - self.x[0]
 
     @classmethod
-    def from_dict(cls, params) -> 'ZSAtom':
+    def from_dict(cls, params) -> 'CSCAtom':
         return cls(params['b'], params['y'], params['s'])
 
     def __str__(self) -> str:
@@ -78,9 +78,9 @@ class ZSAtom() :
 
     def __eq__(self, other: object) -> bool:
         """
-        Check if two ZSAtoms are equal according on the shape parameters
+        Check if two CSCAtoms are equal according on the shape parameters
         """
-        if not isinstance(other, ZSAtom):
+        if not isinstance(other, CSCAtom):
             return False
         return ((self.params['b'] == other.params['b']) and (self.params['y'] == other.params['y']))
     
@@ -103,17 +103,17 @@ class ZSAtom() :
             self.values /= other
             return self
         else:
-            raise TypeError("Unsupported operand type for /: 'ZSDictionary' and '{}'".format(type(other).__name__))
+            raise TypeError("Unsupported operand type for /: 'CSCDictionary' and '{}'".format(type(other).__name__))
     
     def __itruediv__(self, other):
         if isinstance(other, (int, float)):
             self.atoms = [atom / other for atom in self.atoms]
             return self
         else:
-            raise TypeError("Unsupported operand type for /=: 'ZSDictionary' and '{}'".format(type(other).__name__))
+            raise TypeError("Unsupported operand type for /=: 'CSCDictionary' and '{}'".format(type(other).__name__))
     
-    def copy(self) -> 'ZSAtom':
-        return ZSAtom(self.params['b'], self.params['y'], self.params['sigma'])
+    def copy(self) -> 'CSCAtom':
+        return CSCAtom(self.params['b'], self.params['y'], self.params['sigma'])
 
     def set_param(self, key, value):
         self.params[key] = value
@@ -147,25 +147,25 @@ class ZSAtom() :
         return var / (10 ** (snr / 10))
     
     def getNoiseVarToSNR(self, snr) -> float:
-        return ZSAtom.noiseVarForSNR(self.var, snr)
+        return CSCAtom.noiseVarForSNR(self.var, snr)
 
     def getSignal(self, *args, **kwargs) -> np.ndarray:
-        """Returns the ZS atom signal
+        """Returns the CSC atom signal
         Args:
             signal_length (int): The desired length of the atom signal
             offset (int): The offset of the atom signal
         Returns:
-            np.ndarray: The ZS atom signal
+            np.ndarray: The CSC atom signal
         """
         return self.values
     
     def getAtomInSignal(self, signal_length, offset) -> np.ndarray:
-        """Returns the ZS atom signal in a signal
+        """Returns the CSC atom signal in a signal
         Args:
             signal_length (int): The desired length of the signal
             offset (int): The offset of the atom signal
         Returns:
-            np.ndarray: The ZS atom signal in a signal
+            np.ndarray: The CSC atom signal in a signal
         """
         signal = np.zeros(signal_length)
         signal[offset:offset + len(self)] = self.values

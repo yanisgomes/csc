@@ -3,5 +3,4 @@
 # SPDX-License-Identifier: MIT
 from .mmp import *
 from .atoms import *
-from .workbench import *
 from .dictionary import *

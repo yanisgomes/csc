@@ -15,8 +15,8 @@ import scipy.stats as stats
 import scikit_posthocs as sp
 from scipy.interpolate import interp1d
 
-from .dictionary import ZSDictionary
-from .atoms import ZSAtom
+from .dictionary import CSCDictionary
+from .atoms import CSCAtom
 from .mmp import MMPTree
 from .utils import *
 
@@ -31,7 +31,7 @@ from critdd import Diagram
 
 import statsmodels.api as sm
 
-class ReportWorkbench:
+class CSCWorkbench:
 
     def __init__(self, signals_path:str):
 
@@ -48,7 +48,7 @@ class ReportWorkbench:
         # Workbench state
         self.loaded = False
 
-        # ZSDictionary
+        # CSCDictionary
         self.dictionary = None
 
         # F1 score threshold
@@ -71,7 +71,7 @@ class ReportWorkbench:
         with open(db_path, 'r') as file:
             return json.load(file)
 
-    def set_dictionary(self, dictionary: ZSDictionary):
+    def set_dictionary(self, dictionary: CSCDictionary):
         """
         Charge a dictionary to the workbench.
         """
@@ -146,8 +146,8 @@ class ReportWorkbench:
             List[Tuple[Dict,Dict]]: List of tuples of matched atoms dict.
         """
 
-        true_atoms = [ZSAtom.from_dict(atom) for atom in true_atoms_dict]
-        approx_atoms = [ZSAtom.from_dict(atom) for atom in approx_atoms_dict]
+        true_atoms = [CSCAtom.from_dict(atom) for atom in true_atoms_dict]
+        approx_atoms = [CSCAtom.from_dict(atom) for atom in approx_atoms_dict]
         # Pad the atoms
         for atom in true_atoms:
             atom.padBothSides(self.dictionary.getAtomsLength())
@@ -186,14 +186,14 @@ class ReportWorkbench:
         # Compute correlation matrix
         true_signals = []
         for atom in true_atoms:
-            zs_atom = ZSAtom.from_dict(atom)
-            zs_atom.padBothSides(self.dictionary.getAtomsLength())
-            true_signals.append(zs_atom.getAtomInSignal(self.signals_length, atom['x']))
+            CSC_atom = CSCAtom.from_dict(atom)
+            CSC_atom.padBothSides(self.dictionary.getAtomsLength())
+            true_signals.append(CSC_atom.getAtomInSignal(self.signals_length, atom['x']))
         approx_signals = []
         for atom in approx_atoms:
-            zs_atom = ZSAtom.from_dict(atom)
-            zs_atom.padBothSides(self.dictionary.getAtomsLength())
-            approx_signals.append(zs_atom.getAtomInSignal(self.signals_length, atom['x']))
+            CSC_atom = CSCAtom.from_dict(atom)
+            CSC_atom.padBothSides(self.dictionary.getAtomsLength())
+            approx_signals.append(CSC_atom.getAtomInSignal(self.signals_length, atom['x']))
         correlation_matrix = np.zeros((len(true_atoms), len(approx_atoms)))
 
         for i, true_signal in enumerate(true_signals):
@@ -468,9 +468,9 @@ class ReportWorkbench:
         true_atoms = signal_dict['atoms']
         true_signal = np.zeros_like(signal_dict['signal'])
         for atom_dict in true_atoms :
-            zs_atom = ZSAtom(atom_dict['b'], atom_dict['y'], atom_dict['s'])
-            zs_atom.padBothSides(self.dictionary.getAtomsLength())
-            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
+            CSC_atom = CSCAtom(atom_dict['b'], atom_dict['y'], atom_dict['s'])
+            CSC_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = CSC_atom.getAtomInSignal(len(signal_dict['signal']), atom_dict['x'])
             true_signal += atom_signal
 
         fig, axs = plt.subplots(3, 1, figsize=(12, 3*3), sharex=True)
@@ -889,11 +889,11 @@ class ReportWorkbench:
         corr_errors = []
         for true_atom, predicted_atom in matched_atoms:
             # Build the ture atom's signal
-            true_atom_obj = ZSAtom.from_dict(true_atom)
+            true_atom_obj = CSCAtom.from_dict(true_atom)
             true_atom_obj.padBothSides(self.dictionary.getAtomsLength())
             true_atom_signal = true_atom_obj.getAtomInSignal(self.signals_length, true_atom['x'])
             # Build the predicted atom's signal 
-            predicted_atom_obj = ZSAtom.from_dict(predicted_atom)
+            predicted_atom_obj = CSCAtom.from_dict(predicted_atom)
             predicted_atom_obj.padBothSides(self.dictionary.getAtomsLength())
             predicted_atom_signal = predicted_atom_obj.getAtomInSignal(self.signals_length, predicted_atom['x'])
             corr = np.correlate(true_atom_signal, predicted_atom_signal, mode='valid')[0]
@@ -1035,12 +1035,12 @@ class ReportWorkbench:
         atoms_signals = list()
         # Compute the atoms signals
         for atom in atoms_list:
-            zs_atom = ZSAtom.from_dict(atom)
-            zs_atom.padBothSides(self.dictionary.getAtomsLength())
-            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
+            CSC_atom = CSCAtom.from_dict(atom)
+            CSC_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = CSC_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
             atoms_signals.append(atom_signal)
         # Build the binary support vector for each atom
-        bin_atoms_signals = [np.where(np.abs(atom_signal) > ZSAtom.SUPPORT_THRESHOLD, 1, 0) for atom_signal in atoms_signals]
+        bin_atoms_signals = [np.where(np.abs(atom_signal) > CSCAtom.SUPPORT_THRESHOLD, 1, 0) for atom_signal in atoms_signals]
         overlap_vector = sum(bin_atoms_signals)
         return overlap_vector
     
@@ -1136,9 +1136,9 @@ class ReportWorkbench:
         # Compute the atoms signals
         offset = 1.5*max(np.abs(signal_dict['signal']))
         for i, atom in enumerate(atoms_list):
-            zs_atom = ZSAtom.from_dict(atom)
-            zs_atom.padBothSides(self.dictionary.getAtomsLength())
-            atom_signal = zs_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
+            CSC_atom = CSCAtom.from_dict(atom)
+            CSC_atom.padBothSides(self.dictionary.getAtomsLength())
+            atom_signal = CSC_atom.getAtomInSignal(len(signal_dict['signal']), atom['x'])
             true_signal += atom_signal
             # Plot the atom's signal
             axs[1].plot(atom_signal + i*offset, label=f'Atom at {atom["x"]}', alpha=0.6, lw=2)
@@ -1188,14 +1188,14 @@ class ReportWorkbench:
 
         for i, (omp_atom, mmp_atom) in enumerate(zip(omp_atoms_dict, mmp_atoms_dict)) :
             # Construct the atoms from parameters
-            omp_zs_atom = ZSAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
-            omp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
-            mmp_zs_atom = ZSAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
-            mmp_zs_atom.padBothSides(self.dictionary.getAtomsLength())
+            omp_CSC_atom = CSCAtom(omp_atom['b'], omp_atom['y'], omp_atom['s'])
+            omp_CSC_atom.padBothSides(self.dictionary.getAtomsLength())
+            mmp_CSC_atom = CSCAtom(mmp_atom['b'], mmp_atom['y'], mmp_atom['s'])
+            mmp_CSC_atom.padBothSides(self.dictionary.getAtomsLength())
             # Get the atom signals
-            omp_atom_signal = omp_zs_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
+            omp_atom_signal = omp_CSC_atom.getAtomInSignal(len(signal_dict['signal']), omp_atom['x'])
             omp_signal += omp_atom_signal
-            mmp_atom_signal = mmp_zs_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
+            mmp_atom_signal = mmp_CSC_atom.getAtomInSignal(len(signal_dict['signal']), mmp_atom['x'])
             mmp_signal += mmp_atom_signal
 
         # Get the overlap vector of the signal

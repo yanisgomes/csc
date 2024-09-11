@@ -18,7 +18,7 @@ from joblib import Parallel, delayed
 
 from alphacsc.update_z import update_z
 
-from .atoms import ZSAtom
+from .atoms import CSCAtom
 from .mmp import MMPTree
 from .utils import *
 
@@ -44,9 +44,9 @@ def time_decorator(func):
         return result
     return wrapper
 
-class ZSDictionary() :
+class CSCDictionary() :
 
-    def __init__(self, atoms_list:List[ZSAtom]) :        
+    def __init__(self, atoms_list:List[CSCAtom]) :        
         # Build the atoms and pad them to the same length
         self.atoms = atoms_list
         self.atoms_length = max([len(atom) for atom in self.atoms])
@@ -60,9 +60,9 @@ class ZSDictionary() :
         self.performance_log = {}  # {method_name: execution_time}
 
     @classmethod
-    def from_values(cls, b_values, y_values, s_values) -> 'ZSDictionary':
+    def from_values(cls, b_values, y_values, s_values) -> 'CSCDictionary':
         """
-        Create a ZSDictionary object from the given range of values for b, y, and s.
+        Create a CSCDictionary object from the given range of values for b, y, and s.
 
         Args:
             b_tuple (Tuple[float, float, float]): A tuple representing the range of values for b (b_min, b_max, b_step).
@@ -70,17 +70,17 @@ class ZSDictionary() :
             s_tuple (Tuple[float, float, float]): A tuple representing the range of values for s (s_min, s_max, s_step).
 
         Returns:
-            ZSDictionary: A ZSDictionary object containing ZSAtom objects generated from the combinations of b, y, and s values.
+            CSCDictionary: A CSCDictionary object containing CSCAtom objects generated from the combinations of b, y, and s values.
 
         """
         atoms = list()
         combinations = list(product(b_values, y_values, s_values))
-        # Create ZSAtom objects for each combination
-        atoms = [ZSAtom(b, y, s) for b, y, s in combinations]
+        # Create CSCAtom objects for each combination
+        atoms = [CSCAtom(b, y, s) for b, y, s in combinations]
         return cls(atoms)
 
     def __str__(self) -> str:
-        return "ZSMeasurementMatrix object with {} different atoms".format(len(self))
+        return "CSCMeasurementMatrix object with {} different atoms".format(len(self))
     
     def __len__(self) -> int:
         return len(self.atoms)
@@ -91,7 +91,7 @@ class ZSDictionary() :
                 if atom.params['b'] == item[0] and atom.params['y'] == item[1] and atom.params['sigma'] == item[2] :
                     return True
             return False
-        elif isinstance(item, ZSAtom):
+        elif isinstance(item, CSCAtom):
             params = (item.params['b'], item.params['y'], item.params['sigma'])
             return params in self
         else:
@@ -103,10 +103,10 @@ class ZSDictionary() :
     def disable_timing(self):
         self.timing_enabled = False
 
-    def getAtom(self, idx:int) -> ZSAtom:
+    def getAtom(self, idx:int) -> CSCAtom:
         return self.atoms[idx]
 
-    def getAtoms(self) -> List[ZSAtom] :
+    def getAtoms(self) -> List[CSCAtom] :
         return self.atoms
 
     def getLocalDictionary(self) -> np.ndarray:
@@ -124,39 +124,39 @@ class ZSDictionary() :
             tolerance (float, optional): The tolerance for the comparison. Defaults to 1e-5.
 
         Returns:
-            ZSAtom: The atom with the given parameters. If no such atom exists, returns None.
+            CSCAtom: The atom with the given parameters. If no such atom exists, returns None.
         """
         for atom in self.atoms:
             if np.isclose(atom.b, b, atol=tolerance) and np.isclose(atom.y, y, atol=tolerance) and np.isclose(atom.sigma, s, atol=tolerance):
                 return atom
         return None
     
-    def atomsSimilarTo(self, atom:ZSAtom, threshold=0.95) -> List[ZSAtom]:
+    def atomsSimilarTo(self, atom:CSCAtom, threshold=0.95) -> List[CSCAtom]:
         """
         Get a list of atoms similar to the given atom based on its parameters.
 
         Args:
-            atom (ZSAtom): The atom to compare with.
+            atom (CSCAtom): The atom to compare with.
             tolerance (float, optional): The tolerance for the comparison. Defaults to 1e-5.
 
         Returns:
-            List[ZSAtom]: A list of atoms similar to the given atom.
+            List[CSCAtom]: A list of atoms similar to the given atom.
         """
         correlations = self.computeCorrelations(atom())
         print()
         similar_atoms = [self.atoms[i] for i in np.where(correlations > threshold)[0]]
         return similar_atoms
     
-    def atomsSimilarToParams(self, b, y, s, tolerance=1e-5) -> List[ZSAtom]:
+    def atomsSimilarToParams(self, b, y, s, tolerance=1e-5) -> List[CSCAtom]:
         """
         Get a list of atoms similar to the given atom based on its parameters.
 
         Args:
-            atom (ZSAtom): The atom to compare with.
+            atom (CSCAtom): The atom to compare with.
             tolerance (float, optional): The tolerance for the comparison. Defaults to 1e-5.
 
         Returns:
-            List[ZSAtom]: A list of atoms similar to the given atom.
+            List[CSCAtom]: A list of atoms similar to the given atom.
         """
         atom = self.getAtomFromParams(b, y, s, tolerance=tolerance)
         if atom is None:
@@ -172,12 +172,12 @@ class ZSDictionary() :
             float: The correlation between the two atoms
         """
         # Build atom1 signal
-        atom1 = ZSAtom.from_dict(atom1_dict)
+        atom1 = CSCAtom.from_dict(atom1_dict)
         atom1.padBothSides(self.atoms_length)
         atom1_signal = atom1.getAtomInSignal(signal_length, offset=atom1_dict['x'])
         
         # Build atom2 signal
-        atom2 = ZSAtom.from_dict(atom2_dict)
+        atom2 = CSCAtom.from_dict(atom2_dict)
         atom2.padBothSides(self.atoms_length)
         atom2_signal = atom2.getAtomInSignal(signal_length, offset=atom2_dict['x'])
 
@@ -192,7 +192,7 @@ class ZSDictionary() :
             snr_level (float): The SNR level between noise and the signal
         Returns:
             signal (np.ndarray): The generated test signal
-            atoms_infos (dict): position : ZSAtom corresponding
+            atoms_infos (dict): position : CSCAtom corresponding
         """
         assert sparsity_level <= len(self.atoms), "The sparsity level must be less than or equal to the number of atoms in the dictionary"
         assert signal_length >= self.atoms_length, "The signal length must be greater than or equal to the maximum atom length"
@@ -213,7 +213,7 @@ class ZSDictionary() :
             atoms_infos.append({'x': offset, 'b': b, 'y': y, 's': s})
             noisesVarToSNR.append(self.atoms[idx].getNoiseVarToSNR(snr_level))
         
-        non_zero_index = np.argwhere(np.abs(signal) > ZSAtom.SUPPORT_THRESHOLD)
+        non_zero_index = np.argwhere(np.abs(signal) > CSCAtom.SUPPORT_THRESHOLD)
         non_zero_signal = signal[non_zero_index]
         signal_power = np.var(non_zero_signal)   
         noise_var = signal_power / (10 ** (snr_level / 10))
@@ -278,7 +278,7 @@ class ZSDictionary() :
             corr_err_threshold (float): The maximum correlation error between two similar atoms
         Returns:
             signal (np.ndarray): The generated test signal
-            atoms_infos (dict): position : ZSAtom corresponding
+            atoms_infos (dict): position : CSCAtom corresponding
         """
         assert sparsity_level <= len(self.atoms), "The sparsity level must be less than or equal to the number of atoms in the dictionary"
         assert signal_length >= self.atoms_length, "The signal length must be greater than or equal to the maximum atom length"
@@ -315,7 +315,7 @@ class ZSDictionary() :
             atom_signals.append(atom_full_signal)
             atoms_infos.append({'x': atom_position, 'b': self.atoms[atom_idx].params['b'], 'y': self.atoms[atom_idx].params['y'], 's': self.atoms[atom_idx].params['sigma']})
         
-        non_zero_index = np.argwhere(np.abs(signal) > ZSAtom.SUPPORT_THRESHOLD)
+        non_zero_index = np.argwhere(np.abs(signal) > CSCAtom.SUPPORT_THRESHOLD)
         non_zero_signal = signal[non_zero_index]
         signal_power = np.var(non_zero_signal)   
         noise_var = signal_power / (10 ** (snr_level / 10))
@@ -424,10 +424,10 @@ class ZSDictionary() :
         # Return the composition of the two operators
         return conv_operator @ mask_operator
     
-    def getActivationIdxFromAtom(self, atom:ZSAtom, offset:int) -> int:
+    def getActivationIdxFromAtom(self, atom:CSCAtom, offset:int) -> int:
         """Return the index of the activation corresponding to the atom and the offset
         Args:
-            atom (ZSAtom): The atom to find in the dictionary
+            atom (CSCAtom): The atom to find in the dictionary
             offset (int): The offset of the atom in the signal
         Returns:
             int: The index of the activation corresponding to the atom and the offset
@@ -442,7 +442,7 @@ class ZSDictionary() :
         Returns:
             int: The index of the activation corresponding to the atom parameters
         """
-        atom = ZSAtom.from_dict(params_dict)
+        atom = CSCAtom.from_dict(params_dict)
         offset = params_dict['x']
         return self.getActivationIdxFromAtom(atom, offset)
 
@@ -472,12 +472,12 @@ class ZSDictionary() :
         approx = masked_conv_op @ activations
         return approx, activations
     
-    def getAtomFromActivationIdx(self, activation_idx:int) -> Tuple[ZSAtom, int]:
+    def getAtomFromActivationIdx(self, activation_idx:int) -> Tuple[CSCAtom, int]:
         """Return the atom and the offset corresponding to the activation index
         Args:
             activation_idx (int): The index of the activation in the dictionary
         Returns:
-            Tuple[ZSAtom, int]: The atom and the offset corresponding to the activation index
+            Tuple[CSCAtom, int]: The atom and the offset corresponding to the activation index
         """
         atom_idx = activation_idx % len(self.atoms)
         offset = activation_idx // len(self.atoms)
